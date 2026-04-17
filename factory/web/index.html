@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Data Factory Dashboard</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Local Control Room</p>
+          <h1>Data Factory Dashboard</h1>
+          <p class="hero-copy">
+            Start small generation jobs, inspect saved JSONL outputs, and record manual validation
+            decisions without leaving the browser.
+          </p>
+        </div>
+        <div class="hero-status">
+          <span id="status-pill" class="status-pill status-loading">Connecting</span>
+          <p id="status-text" class="status-text">Probing the local FastAPI backend.</p>
+        </div>
+      </header>
+
+      <section class="control-strip">
+        <label class="control-field">
+          <span>Samples</span>
+          <input id="sample-count-input" type="number" min="1" max="1000" value="10" />
+        </label>
+        <label class="control-field">
+          <span>Seed</span>
+          <input id="seed-input" type="number" value="7" />
+        </label>
+        <label class="control-field control-wide">
+          <span>Model</span>
+          <input id="model-input" type="text" value="gemma4:latest" />
+        </label>
+        <label class="control-field">
+          <span>Timeout (s)</span>
+          <input id="timeout-input" type="number" min="5" max="3600" value="180" />
+        </label>
+        <div class="button-row">
+          <button id="run-one-button" class="button">Run 1 Sample</button>
+          <button id="run-ten-button" class="button button-sand">Run 10 Samples</button>
+          <button id="start-job-button" class="button button-primary">Start Job</button>
+        </div>
+      </section>
+
+      <main class="dashboard-grid">
+        <section class="panel panel-jobs">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Jobs</p>
+              <h2>Recent Runs</h2>
+            </div>
+            <button id="refresh-jobs-button" class="button button-ghost">Refresh</button>
+          </div>
+          <div id="job-list" class="card-list"></div>
+          <div class="log-panel">
+            <div class="log-head">
+              <h3 id="job-log-title">Job Log</h3>
+              <span id="job-log-meta" class="muted-text">Select a job.</span>
+            </div>
+            <pre id="job-log-output" class="log-output">No job selected.</pre>
+          </div>
+        </section>
+
+        <section class="panel panel-files">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Artifacts</p>
+              <h2>Saved JSONL Files</h2>
+            </div>
+            <button id="refresh-files-button" class="button button-ghost">Refresh</button>
+          </div>
+          <div id="file-summary-grid" class="summary-grid"></div>
+
+          <div class="browser-strip">
+            <label class="control-field control-wide">
+              <span>Browse File</span>
+              <select id="file-select"></select>
+            </label>
+            <label class="control-field">
+              <span>Page Size</span>
+              <select id="page-size-select">
+                <option value="10">10</option>
+                <option value="20" selected>20</option>
+                <option value="50">50</option>
+              </select>
+            </label>
+            <div class="button-row">
+              <button id="prev-page-button" class="button">Previous</button>
+              <button id="next-page-button" class="button">Next</button>
+            </div>
+          </div>
+
+          <div class="rows-layout">
+            <div id="row-list" class="row-list"></div>
+            <div class="detail-panel">
+              <div class="detail-meta">
+                <h3 id="detail-title">Row Detail</h3>
+                <span id="detail-review-status" class="review-pill">Unreviewed</span>
+              </div>
+              <textarea id="review-notes" class="review-notes" placeholder="Notes for manual validation"></textarea>
+              <div class="button-row review-buttons">
+                <button id="approve-button" class="button button-primary">Approve</button>
+                <button id="flag-button" class="button button-sand">Flag</button>
+                <button id="reject-button" class="button">Reject</button>
+              </div>
+              <pre id="row-detail" class="detail-output">Select a row to inspect the saved JSON.</pre>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

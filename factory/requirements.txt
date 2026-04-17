@@ -1,0 +1,2 @@
+# Factory pipeline uses the Python standard library at runtime.
+# Install requirements-dev.txt in the project venv for local development and verification.

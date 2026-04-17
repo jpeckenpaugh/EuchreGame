@@ -19,3 +19,6 @@ html/vendor/models/*
 html/vendor/model-libs/*
 !html/vendor/model-libs/.gitkeep
 !html/vendor/model-libs/README.md
+factory/output/*.jsonl
+factory/output/jobs/
+factory/output/manual_reviews.jsonl
