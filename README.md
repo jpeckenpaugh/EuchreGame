@@ -1,6 +1,6 @@
 # EuchreGame
 
-`EuchreGame` is a headless Python package for deterministic Euchre simulation with AI/ML-friendly state export. The repository is structured for local development, test automation, masked player views, and JSON serialization suitable for LLM or policy-model pipelines.
+`EuchreGame` is a headless Python package for deterministic Euchre simulation with AI/ML-friendly state export. The repository now also includes a local training-data factory for generating, validating, benchmarking, and reviewing synthetic Euchre decision data for student-model distillation.
 
 Design and roadmap notes now live in:
 
@@ -22,6 +22,9 @@ The initial implementation includes:
 - masked per-player state export for hidden-information workflows
 - pytest coverage for core behaviors
 - a smoke-test script that plays through a hand end to end
+- a local Data Factory pipeline for synthetic teacher-data generation
+- a benchmark runner for measuring response quality and throughput over decision states
+- a local dashboard for launching jobs, browsing JSONL artifacts, and recording manual reviews
 - a browser-based HTML sandbox that runs the Python engine through Pyodide
 - optional AI-driven browser play using a locally hosted Gemma 4 LiteRT model asset
 - IndexedDB-backed persistence for browser settings, baseline metrics, and session metadata
@@ -47,6 +50,7 @@ Not implemented yet:
 
 ```text
 euchre_game/         Package source
+factory/             Data Factory pipeline, benchmark runner, and local dashboard
 html/                Browser UI sandbox powered by Pyodide
 docs/                Architecture and roadmap notes
 scripts/             Bootstrap and smoke-test scripts
@@ -81,6 +85,96 @@ python scripts/smoke_test.py
 ```bash
 pytest
 ```
+
+## Training Data Factory
+
+The repository includes a local synthetic-data pipeline under `factory/` for distillation-style
+training workflows. The factory is designed around decision-state collection, teacher inference,
+legal-move validation, and training-ready JSONL export.
+
+### Factory Components
+
+- `factory/gen_scenarios.py`
+  - simulates games and captures masked decision states
+- `factory/generate_trajectories.py`
+  - queries the local Ollama-served teacher model
+- `factory/filter_gold_data.py`
+  - validates outputs and writes gold training rows
+- `factory/run_pipeline_job.py`
+  - runs an end-to-end job into a per-run output folder
+- `factory/run_benchmark.py`
+  - benchmarks throughput and quality across many decision responses
+- `factory/server.py`
+  - FastAPI backend for the local dashboard
+- `factory/web/`
+  - static HTML/JS review and job-launch UI
+
+### Current Data Strategy
+
+The current factory flow is optimized for student-model training rather than full play-trace
+coverage:
+
+- only decision states are kept by default
+- forced states with a single legal move are skipped
+- the teacher prompt is constrained to short, grounded reasoning from visible masked-state facts
+- final gold rows are written only for parse-valid, legal responses
+
+### Factory Output Artifacts
+
+Depending on the entry point, the factory writes artifacts such as:
+
+- `scenarios.jsonl`
+- `raw_responses.jsonl`
+- `validated_rows.jsonl`
+- `gold_dataset.jsonl`
+- `rejected_rows.jsonl`
+- `benchmark_summary.json`
+
+Per-job outputs live under `factory/output/jobs/`. Benchmark runs live under
+`factory/output/benchmarks/`.
+
+### Windows-Friendly Venv Setup
+
+For the local AMD Windows machine used for teacher inference:
+
+```powershell
+.\factory\setup_venv.ps1
+```
+
+That creates `.venv` and installs both the runtime dependencies and the development tools used by
+the factory and dashboard.
+
+### Run the Factory Dashboard
+
+Start the FastAPI dashboard locally:
+
+```powershell
+.\factory\start_dashboard.ps1
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8001/
+```
+
+The dashboard can:
+
+- launch small generation jobs
+- inspect saved JSONL files
+- browse individual rows
+- record manual validation decisions
+
+### Run a Benchmark
+
+Example benchmark run for `100` decision responses:
+
+```powershell
+.\.venv\Scripts\python.exe -m factory.run_benchmark --target-responses 100 --concurrency 1
+```
+
+This writes a benchmark folder under `factory/output/benchmarks/` containing the raw responses,
+validated rows, gold dataset, and benchmark summary metrics.
 
 ## HTML Web UI
 

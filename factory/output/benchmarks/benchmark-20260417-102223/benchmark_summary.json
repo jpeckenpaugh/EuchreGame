@@ -1,0 +1,60 @@
+{
+  "benchmark_id": "benchmark-20260417-102223",
+  "started_at": "2026-04-17T10:22:23.078808+00:00",
+  "ended_at": "2026-04-17T10:35:47.141306+00:00",
+  "config": {
+    "target_responses": 100,
+    "seed": 7,
+    "winning_score": 10,
+    "model": "gemma4:latest",
+    "host": "http://127.0.0.1:11434",
+    "timeout": 180.0,
+    "retries": 2,
+    "concurrency": 1,
+    "include_forced": false,
+    "prompt_version": "v2-grounded-short"
+  },
+  "paths": {
+    "scenarios": "factory/output/benchmarks/benchmark-20260417-102223/scenarios.jsonl",
+    "raw_responses": "factory/output/benchmarks/benchmark-20260417-102223/raw_responses.jsonl",
+    "validated_rows": "factory/output/benchmarks/benchmark-20260417-102223/validated_rows.jsonl",
+    "gold_dataset": "factory/output/benchmarks/benchmark-20260417-102223/gold_dataset.jsonl",
+    "rejected_rows": "factory/output/benchmarks/benchmark-20260417-102223/rejected_rows.jsonl"
+  },
+  "metrics": {
+    "attempted_responses": 100,
+    "accepted_gold_rows": 100,
+    "parse_valid_count": 100,
+    "legal_valid_count": 100,
+    "acceptance_rate": 100.0,
+    "parse_failure_rate": 0.0,
+    "illegal_or_rejected_rate": 0.0,
+    "responses_per_minute": 7.46,
+    "wall_time_seconds": 804.06,
+    "latency_ms": {
+      "avg": 8040.24,
+      "p95": 9259.57,
+      "max": 10429.99
+    },
+    "scenario_stats": {
+      "candidate_turns": 165,
+      "kept_scenarios": 100,
+      "skipped_forced_moves": 65
+    },
+    "phase_breakdown": {
+      "order_up": {
+        "attempted": 17,
+        "accepted": 17
+      },
+      "dealer_discard": {
+        "attempted": 8,
+        "accepted": 8
+      },
+      "playing": {
+        "attempted": 75,
+        "accepted": 75
+      }
+    },
+    "failure_buckets": {}
+  }
+}
