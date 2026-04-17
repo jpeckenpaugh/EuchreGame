@@ -10,7 +10,7 @@ Design and roadmap notes now live in:
 
 ## Current Scope
 
-The initial implementation includes:
+The repository currently includes:
 
 - deterministic deck construction and seeded shuffling
 - a stateful `EuchreGame` engine
@@ -26,7 +26,7 @@ The initial implementation includes:
 - a benchmark runner for measuring response quality and throughput over decision states
 - a local dashboard for launching jobs, browsing JSONL artifacts, and recording manual reviews
 - a browser-based HTML sandbox that runs the Python engine through Pyodide
-- optional AI-driven browser play using a locally hosted Gemma 4 LiteRT model asset
+- optional AI-driven browser play using a locally hosted Gemma model path through WebLLM
 - IndexedDB-backed persistence for browser settings, baseline metrics, and session metadata
 
 ## Rule Assumptions
@@ -61,6 +61,14 @@ pyproject.toml       Package metadata and tool configuration
 ```
 
 ## Quick Start
+
+The repo now has two main workflows:
+
+- the core `EuchreGame` engine and browser sandbox
+- the local Data Factory for distillation data generation
+
+If you just want to verify the engine, use the standard quick start below. If you want to work on
+teacher-data generation, jump to `Training Data Factory`.
 
 ### 1. Create the virtual environment
 
@@ -211,24 +219,17 @@ The UI architecture is documented in [docs/ARCHITECTURE.md](/Users/jarad/git/Euc
 
 ### Local AI Mode
 
-The browser UI now includes an optional Gemma/LiteRT path that:
+The browser UI includes an optional local Gemma/WebLLM path that:
 
-- loads MediaPipe GenAI from a vendored local runtime under `html/vendor/tasks-genai/`
-- expects a local `.task` or `.litertlm` model asset under the ignored `html/vendor/models/` folder
-- uses IndexedDB-backed persistence for browser settings, AI baseline metrics, and session metadata
-- keeps the large model binary out of git while still serving it locally through `http.server`
+- loads WebLLM from the vendored runtime under `html/vendor/web-llm/`
+- expects local model assets under the ignored `html/vendor/models/` and
+  `html/vendor/model-libs/` folders
+- uses IndexedDB-backed persistence for browser settings, AI baseline metrics, and session
+  metadata
+- keeps large model artifacts out of git while still serving them locally through `http.server`
 
 Large model binaries are intentionally kept out of git. Setup details are in
 [docs/LOCAL_MODEL_SETUP.md](/Users/jarad/git/EuchreGame/docs/LOCAL_MODEL_SETUP.md).
-
-To fetch the default Gemma 4 E2B browser model into the ignored local path:
-
-```bash
-./scripts/download_gemma_model.sh
-```
-
-That script downloads to `html/vendor/models/gemma-4-E2B-it-web.task`, verifies the pinned
-SHA-256 for the default E2B asset, and leaves the file untracked by git.
 
 ## Minimal Example
 
@@ -260,8 +261,20 @@ console errors when served from `python3 -m http.server`.
 For AI verification, the UI should:
 
 - stay fully usable in random mode when local model assets are absent
-- show a clear missing-asset error when `Load AI` is pressed without `html/vendor/models/gemma-4-E2B-it-web.task`
-- load the configured local LiteRT model once the file path is populated correctly
+- show a clear missing-asset error when `Load AI` is pressed without the configured local model
+  files
+- load the configured local WebLLM model once the local paths are populated correctly
+
+## Project Direction
+
+At this point the repository is best understood as three connected pieces:
+
+- a deterministic Euchre rules engine
+- a browser-based sandbox for gameplay inspection and local AI experiments
+- a local data-generation stack for producing distillation-ready student-model training data
+
+That combination lets the same game logic power simulation, debugging, browser play, teacher-data
+generation, and benchmark analysis from one codebase.
 
 ## Next Work
 
