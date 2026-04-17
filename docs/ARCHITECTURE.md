@@ -30,7 +30,7 @@ The `html/` sandbox exists as an AI testing surface for the Python engine. The c
 - vanilla HTML, CSS, and JavaScript
 - Pyodide for running the local Python engine in-browser
 - a vendored local Pyodide runtime under `html/vendor/pyodide/`
-- a vendored local WebLLM runtime under `html/vendor/web-llm/`
+- a vendored local MediaPipe GenAI runtime under `html/vendor/tasks-genai/`
 - a Python bridge in `html/python/game_bridge.py`
 - browser persistence through IndexedDB for app state and metrics
 
@@ -62,7 +62,7 @@ The browser sandbox should continue supporting:
 The current HTML sandbox now supports an AI integration path where JavaScript can:
 
 1. fetch compact acting-player state from the Python bridge
-2. call a local WebLLM model with JSON-mode output
+2. call a local LiteRT model asset through MediaPipe GenAI
 3. send the chosen move token back to Python for legal application
 4. fall back to random play if the AI output is invalid or illegal
 

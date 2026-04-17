@@ -1,0 +1,28 @@
+{
+  "name": "@mediapipe/tasks-genai",
+  "version": "0.10.27",
+  "description": "MediaPipe GenAI Tasks",
+  "main": "genai_bundle.cjs",
+  "browser": "genai_bundle.mjs",
+  "module": "genai_bundle.mjs",
+  "exports": {
+    ".": {
+      "import": "./genai_bundle.mjs",
+      "require": "./genai_bundle.cjs",
+      "default": "./genai_bundle.mjs",
+      "types": "./genai.d.ts"
+    },
+    "./genai_wasm_internal.js": "./wasm/genai_wasm_internal.js",
+    "./genai_wasm_internal.wasm": "./wasm/genai_wasm_internal.wasm",
+    "./genai_wasm_nosimd_internal.js": "./wasm/genai_wasm_nosimd_internal.js",
+    "./genai_wasm_nosimd_internal.wasm": "./wasm/genai_wasm_nosimd_internal.wasm",
+    "./genai_wasm_module_internal.js": "./wasm/genai_wasm_module_internal.js",
+    "./genai_wasm_module_internal.wasm": "./wasm/genai_wasm_module_internal.wasm"
+  },
+  "author": "mediapipe@google.com",
+  "license": "Apache-2.0",
+  "type": "module",
+  "types": "genai.d.ts",
+  "homepage": "http://mediapipe.dev",
+  "keywords": [ "AR", "ML", "Augmented", "MediaPipe", "MediaPipe Tasks" ]
+}

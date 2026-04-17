@@ -1,4 +1,4 @@
-import * as webllm from "./vendor/web-llm/index.js";
+import * as genai from "./vendor/tasks-genai/genai_bundle.mjs";
 import {
   DEFAULT_METRICS,
   DEFAULT_SESSION,
@@ -17,11 +17,9 @@ const elements = {
   viewSelect: document.querySelector("#view-select"),
   speedSelect: document.querySelector("#speed-select"),
   modeSelect: document.querySelector("#mode-select"),
-  cacheSelect: document.querySelector("#cache-select"),
-  modelIdInput: document.querySelector("#model-id-input"),
   modelPathInput: document.querySelector("#model-path-input"),
-  modelLibInput: document.querySelector("#model-lib-input"),
   aiTemperatureInput: document.querySelector("#ai-temperature-input"),
+  aiTopKInput: document.querySelector("#ai-top-k-input"),
   aiMaxTokensInput: document.querySelector("#ai-max-tokens-input"),
   aiSeedInput: document.querySelector("#ai-seed-input"),
   aiFallbackCheckbox: document.querySelector("#ai-fallback-checkbox"),
@@ -29,7 +27,7 @@ const elements = {
   nextMoveButton: document.querySelector("#next-move-button"),
   autoPlayButton: document.querySelector("#auto-play-button"),
   loadAiButton: document.querySelector("#load-ai-button"),
-  clearAiCacheButton: document.querySelector("#clear-ai-cache-button"),
+  unloadAiButton: document.querySelector("#unload-ai-button"),
   resetMetricsButton: document.querySelector("#reset-metrics-button"),
   phaseValue: document.querySelector("#phase-value"),
   handValue: document.querySelector("#hand-value"),
@@ -52,7 +50,10 @@ const elements = {
   aiStatusLine: document.querySelector("#ai-status-line"),
   cacheStatusLine: document.querySelector("#cache-status-line"),
   storageStatusLine: document.querySelector("#storage-status-line"),
+  aiLastSourceValue: document.querySelector("#ai-last-source-value"),
+  aiLastLatencyValue: document.querySelector("#ai-last-latency-value"),
   metricTotalTurns: document.querySelector("#metric-total-turns"),
+  metricForcedMoves: document.querySelector("#metric-forced-moves"),
   metricValidJson: document.querySelector("#metric-valid-json"),
   metricLegalMoves: document.querySelector("#metric-legal-moves"),
   metricFallbacks: document.querySelector("#metric-fallbacks"),
@@ -62,15 +63,6 @@ const elements = {
 const seatNames = ["North", "East", "South", "West"];
 const suitSymbols = { C: "♣", D: "♦", H: "♥", S: "♠" };
 const suitNames = { C: "Clubs", D: "Diamonds", H: "Hearts", S: "Spades" };
-const AI_JSON_SCHEMA = JSON.stringify({
-  type: "object",
-  properties: {
-    move: { type: "string" },
-    reason: { type: "string" },
-  },
-  required: ["move", "reason"],
-  additionalProperties: false,
-});
 
 const runtimeState = {
   pyodide: null,
@@ -81,7 +73,8 @@ const runtimeState = {
   settings: { ...DEFAULT_SETTINGS },
   metrics: { ...DEFAULT_METRICS },
   session: { ...DEFAULT_SESSION },
-  aiEngine: null,
+  aiRunner: null,
+  aiFileset: null,
   aiLoadPromise: null,
   aiLoadedFingerprint: null,
   aiStatusTone: "ready",
@@ -275,27 +268,59 @@ function formatPercent(numerator, denominator) {
   return `${Math.round((numerator / denominator) * 100)}%`;
 }
 
+function formatLatency(value) {
+  if (!Number.isFinite(value) || value < 0) {
+    return "-";
+  }
+
+  if (value < 1000) {
+    return `${Math.round(value)} ms`;
+  }
+
+  return `${(value / 1000).toFixed(2)} s`;
+}
+
+function formatCountWithPercent(numerator, denominator) {
+  return `${numerator} / ${denominator} (${formatPercent(numerator, denominator)})`;
+}
+
+function displayModelAsset(pathValue) {
+  const trimmed = pathValue.trim();
+  if (!trimmed) {
+    return "-";
+  }
+
+  const normalized = trimmed.replace(/\/+$/, "");
+  const segments = normalized.split("/");
+  return segments[segments.length - 1] || normalized;
+}
+
 function renderAiPanel() {
   elements.aiModeValue.textContent =
     runtimeState.settings.playMode === "ai" ? "Gemma AI" : "Random";
-  elements.aiCacheValue.textContent = runtimeState.settings.aiUseIndexedDBCache
-    ? "IndexedDB"
-    : "Cache API";
+  elements.aiCacheValue.textContent = displayModelAsset(runtimeState.settings.aiModelPath);
   elements.aiStatusLine.textContent = runtimeState.session.ai_status;
   elements.cacheStatusLine.textContent = runtimeState.session.ai_cache_status;
   elements.storageStatusLine.textContent = runtimeState.session.storage_status;
+  elements.aiLastSourceValue.textContent = runtimeState.session.last_move_source || "-";
+  elements.aiLastLatencyValue.textContent = formatLatency(runtimeState.session.last_ai_latency_ms);
   elements.metricTotalTurns.textContent = String(runtimeState.metrics.total_turns);
-  elements.metricValidJson.textContent = formatPercent(
+  elements.metricForcedMoves.textContent = String(runtimeState.metrics.forced_move_count);
+  elements.metricValidJson.textContent = formatCountWithPercent(
     runtimeState.metrics.valid_json_count,
     runtimeState.metrics.total_turns,
   );
-  elements.metricLegalMoves.textContent = formatPercent(
+  elements.metricLegalMoves.textContent = formatCountWithPercent(
     runtimeState.metrics.legal_move_count,
     runtimeState.metrics.total_turns,
   );
   elements.metricFallbacks.textContent = String(runtimeState.metrics.fallback_count);
-  elements.loadAiButton.textContent =
-    runtimeState.aiLoadPromise != null ? "Loading AI..." : "Load AI";
+  elements.loadAiButton.textContent = runtimeState.aiLoadPromise
+    ? "Loading AI..."
+    : runtimeState.aiRunner
+      ? "Reload AI"
+      : "Load AI";
+  elements.unloadAiButton.disabled = !runtimeState.bridgeModule || !runtimeState.aiRunner;
 }
 
 function renderSnapshot(snapshot) {
@@ -342,7 +367,7 @@ function setControlsEnabled(enabled) {
   elements.nextMoveButton.disabled = !enabled;
   elements.autoPlayButton.disabled = !enabled;
   elements.loadAiButton.disabled = !enabled;
-  elements.clearAiCacheButton.disabled = !enabled;
+  elements.unloadAiButton.disabled = !enabled || !runtimeState.aiRunner;
   elements.resetMetricsButton.disabled = !enabled;
 }
 
@@ -423,8 +448,9 @@ import sys
 if "/app" not in sys.path:
     sys.path.insert(0, "/app")
 
-importlib.invalidate_caches()
+import importlib
 import game_bridge
+importlib.invalidate_caches()
 importlib.reload(game_bridge)
 `);
   } catch (error) {
@@ -435,6 +461,13 @@ importlib.reload(game_bridge)
 function setAiStatus(message, tone = "ready") {
   runtimeState.session.ai_status = message;
   runtimeState.aiStatusTone = tone;
+  renderAiPanel();
+  void persistSession();
+}
+
+function setLastMoveSource(source, latencyMs = null) {
+  runtimeState.session.last_move_source = source;
+  runtimeState.session.last_ai_latency_ms = latencyMs;
   renderAiPanel();
   void persistSession();
 }
@@ -483,22 +516,16 @@ function applySettingsToControls() {
   elements.viewSelect.value = runtimeState.settings.selectedView;
   elements.speedSelect.value = runtimeState.settings.autoSpeed;
   elements.modeSelect.value = runtimeState.settings.playMode;
-  elements.cacheSelect.value = runtimeState.settings.aiUseIndexedDBCache ? "indexeddb" : "cache";
-  elements.modelIdInput.value = runtimeState.settings.aiModelId;
   elements.modelPathInput.value = runtimeState.settings.aiModelPath;
-  elements.modelLibInput.value = runtimeState.settings.aiModelLib;
   elements.aiTemperatureInput.value = String(runtimeState.settings.aiTemperature);
+  elements.aiTopKInput.value = String(runtimeState.settings.aiTopK);
   elements.aiMaxTokensInput.value = String(runtimeState.settings.aiMaxTokens);
   elements.aiSeedInput.value = runtimeState.settings.aiSeed;
   elements.aiFallbackCheckbox.checked = runtimeState.settings.aiAutoFallback;
 }
 
-function sanitizeTextInput(value, { trailingSlash = false } = {}) {
-  let normalized = value.trim();
-  if (trailingSlash && normalized && !normalized.endsWith("/")) {
-    normalized += "/";
-  }
-  return normalized;
+function sanitizeTextInput(value) {
+  return value.trim();
 }
 
 function readSettingsFromControls() {
@@ -507,62 +534,98 @@ function readSettingsFromControls() {
     selectedView: elements.viewSelect.value,
     autoSpeed: elements.speedSelect.value,
     playMode: elements.modeSelect.value,
-    aiUseIndexedDBCache: elements.cacheSelect.value === "indexeddb",
-    aiModelId: sanitizeTextInput(elements.modelIdInput.value),
-    aiModelPath: sanitizeTextInput(elements.modelPathInput.value, { trailingSlash: true }),
-    aiModelLib: sanitizeTextInput(elements.modelLibInput.value),
-    aiTemperature: Number.parseFloat(elements.aiTemperatureInput.value) || 0.2,
-    aiMaxTokens: Number.parseInt(elements.aiMaxTokensInput.value, 10) || 96,
+    aiModelPath: sanitizeTextInput(elements.modelPathInput.value),
+    aiTemperature: Number.parseFloat(elements.aiTemperatureInput.value) || 0.1,
+    aiTopK: Number.parseInt(elements.aiTopKInput.value, 10) || 1,
+    aiMaxTokens: Number.parseInt(elements.aiMaxTokensInput.value, 10) || 256,
     aiSeed: elements.aiSeedInput.value.trim(),
     aiAutoFallback: elements.aiFallbackCheckbox.checked,
   };
   renderAiPanel();
 }
 
+function migrateSettings(persistedSettings) {
+  const migrated = {
+    ...DEFAULT_SETTINGS,
+    ...persistedSettings,
+  };
+
+  if (!migrated.aiModelPath || !/\.(task|litertlm)$/i.test(migrated.aiModelPath)) {
+    migrated.aiModelPath = DEFAULT_SETTINGS.aiModelPath;
+  }
+
+  if (!Number.isFinite(Number(migrated.aiTemperature))) {
+    migrated.aiTemperature = DEFAULT_SETTINGS.aiTemperature;
+  }
+
+  if (!Number.isFinite(Number(migrated.aiTopK)) || Number(migrated.aiTopK) < 1) {
+    migrated.aiTopK = DEFAULT_SETTINGS.aiTopK;
+  }
+
+  if (!Number.isFinite(Number(migrated.aiMaxTokens)) || Number(migrated.aiMaxTokens) < 64) {
+    migrated.aiMaxTokens = DEFAULT_SETTINGS.aiMaxTokens;
+  }
+
+  if (typeof migrated.aiSeed !== "string") {
+    migrated.aiSeed = DEFAULT_SETTINGS.aiSeed;
+  }
+
+  return migrated;
+}
+
 function resolveAssetUrl(value) {
   return new URL(value, import.meta.url).href;
 }
 
-function buildAiConfig() {
-  const settings = runtimeState.settings;
-  const modelUrl = resolveAssetUrl(settings.aiModelPath);
-  const modelLibUrl = resolveAssetUrl(settings.aiModelLib);
-  const appConfig = {
-    model_list: [
-      {
-        model: modelUrl,
-        model_id: settings.aiModelId,
-        model_lib: modelLibUrl,
-      },
-    ],
-    useIndexedDBCache: settings.aiUseIndexedDBCache,
-  };
-
-  return { appConfig, modelUrl, modelLibUrl };
-}
-
 function currentAiFingerprint() {
-  const settings = runtimeState.settings;
   return JSON.stringify({
-    modelId: settings.aiModelId,
-    modelPath: settings.aiModelPath,
-    modelLib: settings.aiModelLib,
-    useIndexedDBCache: settings.aiUseIndexedDBCache,
+    modelPath: runtimeState.settings.aiModelPath,
+    temperature: runtimeState.settings.aiTemperature,
+    topK: runtimeState.settings.aiTopK,
+    maxTokens: runtimeState.settings.aiMaxTokens,
+    aiSeed: runtimeState.settings.aiSeed,
   });
 }
 
-async function fetchOk(url, init) {
-  const response = await fetch(url, init);
+function getSeedValue() {
+  const parsedSeed = Number.parseInt(runtimeState.settings.aiSeed, 10);
+  return Number.isFinite(parsedSeed) ? parsedSeed : undefined;
+}
+
+function buildLlmOptions(modelUrl) {
+  const options = {
+    baseOptions: {
+      modelAssetPath: modelUrl,
+    },
+    maxTokens: runtimeState.settings.aiMaxTokens,
+    topK: runtimeState.settings.aiTopK,
+    temperature: runtimeState.settings.aiTemperature,
+  };
+
+  const seed = getSeedValue();
+  if (seed !== undefined) {
+    options.randomSeed = seed;
+  }
+
+  return options;
+}
+
+async function fetchOk(url) {
+  let response = await fetch(url, { method: "HEAD" });
+  if (response.status === 405 || response.status === 501) {
+    response = await fetch(url, { method: "GET" });
+  }
   if (!response.ok) {
     throw new Error(`Missing required local asset at ${url} (${response.status})`);
   }
 }
 
-async function verifyLocalModelAssets() {
-  const { modelUrl, modelLibUrl } = buildAiConfig();
-  const configUrl = new URL("mlc-chat-config.json", modelUrl).href;
-  await fetchOk(configUrl, { method: "GET" });
-  await fetchOk(modelLibUrl, { method: "HEAD" });
+async function verifyLocalModelAsset() {
+  const modelUrl = resolveAssetUrl(runtimeState.settings.aiModelPath);
+  await fetchOk(modelUrl);
+  runtimeState.session.ai_cache_status = `Local model asset found: ${displayModelAsset(runtimeState.settings.aiModelPath)}.`;
+  renderAiPanel();
+  return modelUrl;
 }
 
 async function ensureStoragePersistence() {
@@ -592,40 +655,40 @@ async function ensureStoragePersistence() {
   renderAiPanel();
 }
 
-async function updateModelCacheStatus(appConfig) {
-  const cached = await webllm.hasModelInCache(runtimeState.settings.aiModelId, appConfig);
-  runtimeState.session.ai_cache_status = cached
-    ? `Model artifacts are cached in ${
-        runtimeState.settings.aiUseIndexedDBCache ? "IndexedDB" : "the Cache API"
-      }.`
-    : `Model artifacts are not cached yet in ${
-        runtimeState.settings.aiUseIndexedDBCache ? "IndexedDB" : "the Cache API"
-      }.`;
-  renderAiPanel();
+async function ensureGenAiFileset() {
+  if (runtimeState.aiFileset) {
+    return runtimeState.aiFileset;
+  }
+
+  const wasmBase = new URL("./vendor/tasks-genai/wasm/", import.meta.url).href;
+  runtimeState.aiFileset = await genai.FilesetResolver.forGenAiTasks(wasmBase);
+  return runtimeState.aiFileset;
 }
 
 async function unloadAiEngine() {
-  if (!runtimeState.aiEngine) {
+  if (!runtimeState.aiRunner) {
+    renderAiPanel();
     return;
   }
+
   try {
-    await runtimeState.aiEngine.unload();
+    runtimeState.aiRunner.close();
   } catch {
-    // Ignore unload issues; a subsequent reload will replace the instance.
+    // Ignore cleanup issues; the browser can recover on the next load.
   }
-  runtimeState.aiEngine = null;
+
+  runtimeState.aiRunner = null;
   runtimeState.aiLoadedFingerprint = null;
+  runtimeState.session.ai_status = "AI unloaded.";
+  renderAiPanel();
+  await persistSession();
 }
 
 async function loadAiEngine(forceReload = false) {
   readSettingsFromControls();
   const fingerprint = currentAiFingerprint();
-  if (
-    runtimeState.aiEngine &&
-    runtimeState.aiLoadedFingerprint === fingerprint &&
-    !forceReload
-  ) {
-    return runtimeState.aiEngine;
+  if (runtimeState.aiRunner && runtimeState.aiLoadedFingerprint === fingerprint && !forceReload) {
+    return runtimeState.aiRunner;
   }
 
   if (runtimeState.aiLoadPromise && !forceReload) {
@@ -633,46 +696,41 @@ async function loadAiEngine(forceReload = false) {
   }
 
   runtimeState.aiLoadPromise = (async () => {
-    const { appConfig } = buildAiConfig();
     await ensureStoragePersistence();
-    setAiStatus(`Checking local assets for ${runtimeState.settings.aiModelId}...`, "loading");
-    await verifyLocalModelAssets();
-    await updateModelCacheStatus(appConfig);
+    const modelUrl = await verifyLocalModelAsset();
+    const wasmFileset = await ensureGenAiFileset();
     await unloadAiEngine();
 
-    setAiStatus(`Loading AI model ${runtimeState.settings.aiModelId}...`, "loading");
-    setStatus("Loading AI brain from local assets.", "loading");
+    const modelName = displayModelAsset(runtimeState.settings.aiModelPath);
+    setAiStatus(`Loading ${modelName} with LiteRT...`, "loading");
+    setStatus("Loading local LiteRT model asset.", "loading");
 
-    const engine = await webllm.CreateMLCEngine(runtimeState.settings.aiModelId, {
-      appConfig,
-      initProgressCallback: (progress) => {
-        const message = progress?.text ?? `Loading ${runtimeState.settings.aiModelId}...`;
-        runtimeState.session.ai_status = message;
-        renderAiPanel();
-        setStatus(message, "loading");
-      },
-    });
+    const runner = await genai.LlmInference.createFromOptions(
+      wasmFileset,
+      buildLlmOptions(modelUrl),
+    );
 
-    runtimeState.aiEngine = engine;
+    runtimeState.aiRunner = runner;
     runtimeState.aiLoadedFingerprint = fingerprint;
-    const gpuVendor = await engine.getGPUVendor().catch(() => "Unknown GPU");
-    await updateModelCacheStatus(appConfig);
-    setAiStatus(`AI ready on ${gpuVendor}.`, "ready");
-    setStatus("Pyodide and AI are ready.", "ready");
-    return engine;
-  })().catch((error) => {
-    const errorMessage = formatError(error);
-    runtimeState.aiEngine = null;
-    runtimeState.aiLoadedFingerprint = null;
-    runtimeState.session.ai_cache_status = "AI cache unavailable because the model did not load.";
-    setAiStatus(errorMessage, "error");
-    setStatus(errorMessage, "error");
-    throw error;
-  }).finally(() => {
-    runtimeState.aiLoadPromise = null;
-    renderAiPanel();
-    schedulePersistSession();
-  });
+    runtimeState.session.ai_cache_status = `Loaded ${modelName} from the local vendor path.`;
+    setAiStatus(`${modelName} is ready.`, "ready");
+    setStatus("Pyodide and LiteRT AI are ready.", "ready");
+    return runner;
+  })()
+    .catch((error) => {
+      const errorMessage = formatError(error);
+      runtimeState.aiRunner = null;
+      runtimeState.aiLoadedFingerprint = null;
+      runtimeState.session.ai_cache_status = "AI unavailable because the model asset did not load.";
+      setAiStatus(errorMessage, "error");
+      setStatus(errorMessage, "error");
+      throw error;
+    })
+    .finally(() => {
+      runtimeState.aiLoadPromise = null;
+      renderAiPanel();
+      schedulePersistSession();
+    });
 
   return runtimeState.aiLoadPromise;
 }
@@ -711,66 +769,68 @@ async function refreshView() {
   renderSnapshot(snapshot);
 }
 
-async function stepRandom() {
+async function stepRandom(source = "Random") {
   const snapshot = await callBridge("step_random", parseViewSelection());
+  setLastMoveSource(source, null);
   renderSnapshot(snapshot);
   if (snapshot.summary.match_complete) {
     runtimeState.autoRunning = false;
   }
 }
 
-function buildAiMessages(aiContext) {
+function buildAiPrompt(aiContext) {
+  const legalTokens = JSON.stringify(aiContext.legal_move_tokens);
   return [
-    {
-      role: "system",
-      content:
-        "You are a Euchre move selector. Return JSON only. The `move` field must exactly match one token from Leg. Do not invent moves.",
-    },
-    {
-      role: "user",
-      content:
-        "Choose the single best legal move for the acting player.\n" +
-        `State: ${aiContext.compact_state}\n` +
-        'Return exactly: {"move":"TOKEN","reason":"brief explanation"}',
-    },
-  ];
-}
-
-function getCompletionText(completion) {
-  const content = completion?.choices?.[0]?.message?.content;
-  if (typeof content === "string") {
-    return content;
-  }
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === "string") {
-          return part;
-        }
-        if (part && typeof part === "object" && "text" in part) {
-          return part.text;
-        }
-        return "";
-      })
-      .join("");
-  }
-  if (content && typeof content === "object") {
-    return JSON.stringify(content);
-  }
-  return "";
+    "You are selecting exactly one legal Euchre move for the acting player.",
+    'Return only minified JSON in this exact format: {"move":"TOKEN"}',
+    "Do not include markdown fences, explanations, or any keys other than move.",
+    `Compact state: ${aiContext.compact_state}`,
+    `Allowed move tokens (copy exactly one): ${legalTokens}`,
+    "The move value must exactly match one allowed token.",
+  ].join("\n");
 }
 
 function parseAiJsonResponse(rawText) {
-  const parsed = JSON.parse(rawText);
-  if (!parsed || typeof parsed !== "object") {
-    throw new Error("Model did not return a JSON object.");
+  const trimmed = rawText.trim();
+  const candidates = [trimmed];
+
+  if (trimmed.startsWith("```")) {
+    const withoutFence = trimmed
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+    candidates.push(withoutFence);
   }
+
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    candidates.push(trimmed.slice(firstBrace, lastBrace + 1));
+  }
+
+  let parsed = null;
+  let lastError = null;
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+    try {
+      parsed = JSON.parse(candidate);
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    throw lastError ?? new Error("Model did not return a JSON object.");
+  }
+
   const move = typeof parsed.move === "string" ? parsed.move.trim() : "";
-  const reason = typeof parsed.reason === "string" ? parsed.reason.trim() : "";
   if (!move) {
     throw new Error("Model response JSON did not include a non-empty move.");
   }
-  return { move, reason };
+  return { move };
 }
 
 function normalizeMoveToken(token) {
@@ -793,6 +853,7 @@ async function recordAiFailure(kind, detail) {
     message: `AI fallback (${kind}): ${shortDetail}`,
   });
   runtimeState.session.ai_status = `AI fallback used: ${shortDetail}`;
+  setLastMoveSource(`Fallback (${kind})`, null);
   renderAiPanel();
 }
 
@@ -801,7 +862,17 @@ async function performFallback(kind, detail) {
   if (!runtimeState.settings.aiAutoFallback) {
     throw new Error(detail);
   }
-  await stepRandom();
+  await stepRandom(`Fallback to random (${kind})`);
+}
+
+async function applyChosenMove(moveToken, { reason = null, sourceLabel = "AI" } = {}) {
+  const snapshot = await callBridge("apply_move_token", {
+    move_token: normalizeMoveToken(moveToken),
+    reason,
+    source_label: sourceLabel,
+    ...parseViewSelection(),
+  });
+  return snapshot;
 }
 
 async function stepAi() {
@@ -815,13 +886,34 @@ async function stepAi() {
   }
 
   if (currentSnapshot.summary.phase === "hand_complete") {
-    await stepRandom();
+    await stepRandom("Hand rollover");
     return;
   }
 
   const aiContext = currentSnapshot.ai_context ?? (await callBridge("get_ai_context"));
   if (!aiContext) {
-    await stepRandom();
+    await stepRandom("No AI context");
+    return;
+  }
+
+  if (aiContext.legal_move_tokens.length === 1) {
+    const forcedMove = aiContext.legal_move_tokens[0];
+    try {
+      const snapshot = await applyChosenMove(forcedMove, {
+        reason: "Only one legal move was available, so inference was skipped.",
+        sourceLabel: "Forced move",
+      });
+      runtimeState.metrics.forced_move_count += 1;
+      await persistMetrics();
+      runtimeState.session.ai_status = `Skipped inference and auto-applied ${forcedMove}.`;
+      setLastMoveSource("Forced legal move", null);
+      renderSnapshot(snapshot);
+      if (snapshot.summary.match_complete) {
+        runtimeState.autoRunning = false;
+      }
+    } catch (error) {
+      await performFallback("illegal_move", formatError(error));
+    }
     return;
   }
 
@@ -829,9 +921,9 @@ async function stepAi() {
   await persistMetrics();
   renderAiPanel();
 
-  let engine;
+  let runner;
   try {
-    engine = await loadAiEngine();
+    runner = await loadAiEngine();
   } catch (error) {
     await performFallback("engine_error", formatError(error));
     return;
@@ -839,38 +931,25 @@ async function stepAi() {
 
   let aiResponse;
   try {
-    const completion = await engine.chat.completions.create({
-      messages: buildAiMessages(aiContext),
-      response_format: {
-        type: "json_object",
-        schema: AI_JSON_SCHEMA,
-      },
-      temperature: runtimeState.settings.aiTemperature,
-      max_tokens: runtimeState.settings.aiMaxTokens,
-      seed: runtimeState.settings.aiSeed
-        ? Number.parseInt(runtimeState.settings.aiSeed, 10)
-        : undefined,
-      model: runtimeState.settings.aiModelId,
-    });
-
-    const rawText = getCompletionText(completion);
+    setAiStatus(`AI is evaluating ${displayModelAsset(runtimeState.settings.aiModelPath)}...`, "loading");
+    const startedAt = performance.now();
+    const rawText = await runner.generateResponse(buildAiPrompt(aiContext));
+    const elapsedMs = performance.now() - startedAt;
     aiResponse = parseAiJsonResponse(rawText);
     runtimeState.metrics.valid_json_count += 1;
     await persistMetrics();
+    setLastMoveSource("Gemma AI response", elapsedMs);
   } catch (error) {
     await performFallback("invalid_json", formatError(error));
     return;
   }
 
   try {
-    const snapshot = await callBridge("apply_move_token", {
-      move_token: normalizeMoveToken(aiResponse.move),
-      reason: aiResponse.reason,
-      ...parseViewSelection(),
-    });
+    const snapshot = await applyChosenMove(aiResponse.move, { sourceLabel: "AI" });
     runtimeState.metrics.legal_move_count += 1;
     await persistMetrics();
     runtimeState.session.ai_status = `AI selected ${normalizeMoveToken(aiResponse.move)} successfully.`;
+    runtimeState.session.last_move_source = "Gemma AI";
     renderSnapshot(snapshot);
     if (snapshot.summary.match_complete) {
       runtimeState.autoRunning = false;
@@ -901,17 +980,9 @@ async function autoplayLoop() {
     await new Promise((resolve) => window.setTimeout(resolve, delay));
   }
 
-  renderSnapshot(runtimeState.currentSnapshot ?? (await callBridge("get_snapshot", parseViewSelection())));
-}
-
-async function clearAiCache() {
-  readSettingsFromControls();
-  const { appConfig } = buildAiConfig();
-  await unloadAiEngine();
-  await webllm.deleteModelAllInfoInCache(runtimeState.settings.aiModelId, appConfig);
-  runtimeState.session.ai_cache_status = `Cleared cached artifacts for ${runtimeState.settings.aiModelId}.`;
-  renderAiPanel();
-  await persistSession();
+  renderSnapshot(
+    runtimeState.currentSnapshot ?? (await callBridge("get_snapshot", parseViewSelection())),
+  );
 }
 
 async function resetMetrics() {
@@ -929,11 +1000,9 @@ function bindEvents() {
     elements.viewSelect,
     elements.speedSelect,
     elements.modeSelect,
-    elements.cacheSelect,
-    elements.modelIdInput,
     elements.modelPathInput,
-    elements.modelLibInput,
     elements.aiTemperatureInput,
+    elements.aiTopKInput,
     elements.aiMaxTokensInput,
     elements.aiSeedInput,
     elements.aiFallbackCheckbox,
@@ -991,9 +1060,10 @@ function bindEvents() {
     }
   });
 
-  elements.clearAiCacheButton.addEventListener("click", async () => {
+  elements.unloadAiButton.addEventListener("click", async () => {
     try {
-      await clearAiCache();
+      await unloadAiEngine();
+      renderAiPanel();
     } catch (error) {
       setStatus(formatError(error), "error");
     }
@@ -1011,7 +1081,7 @@ function bindEvents() {
 async function hydratePersistentState() {
   runtimeState.db = await openSandboxDB();
   const persisted = await loadPersistedState(runtimeState.db);
-  runtimeState.settings = { ...DEFAULT_SETTINGS, ...persisted.settings };
+  runtimeState.settings = migrateSettings(persisted.settings);
   runtimeState.metrics = { ...DEFAULT_METRICS, ...persisted.metrics };
   runtimeState.session = { ...DEFAULT_SESSION, ...persisted.session };
   applySettingsToControls();

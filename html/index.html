@@ -14,8 +14,9 @@
           <p class="eyebrow">Browser Sandbox</p>
           <h1>EuchreGame in the Browser</h1>
           <p class="hero-copy">
-            This UI runs the local Python engine inside Pyodide, steps through random legal moves,
-            and lets you inspect the full table state or a masked player view.
+            This UI runs the local Python engine inside Pyodide, can drive hands with random legal
+            moves or a local Gemma 4 LiteRT model, and lets you inspect the full table state or a
+            masked player view.
           </p>
         </div>
         <div class="hero-status">
@@ -58,14 +59,6 @@
           </select>
         </label>
 
-        <label class="control-field">
-          <span>Model Cache</span>
-          <select id="cache-select">
-            <option value="indexeddb" selected>IndexedDB</option>
-            <option value="cache">Cache API</option>
-          </select>
-        </label>
-
         <div class="button-row">
           <button id="new-match-button" class="button button-primary" disabled>New Match</button>
           <button id="next-move-button" class="button" disabled>Next Move</button>
@@ -76,43 +69,28 @@
 
       <section class="control-strip ai-strip">
         <label class="control-field control-wide">
-          <span>Model ID</span>
-          <input
-            id="model-id-input"
-            type="text"
-            spellcheck="false"
-            value="Gemma-4-2B-IT-INT4-Local"
-          />
-        </label>
-
-        <label class="control-field control-wide">
-          <span>Model Path</span>
+          <span>Model Asset</span>
           <input
             id="model-path-input"
             type="text"
             spellcheck="false"
-            value="./vendor/models/gemma-4-2b-it-int4/"
-          />
-        </label>
-
-        <label class="control-field control-wide">
-          <span>Model WASM</span>
-          <input
-            id="model-lib-input"
-            type="text"
-            spellcheck="false"
-            value="./vendor/model-libs/gemma-4-2b-it-int4-webgpu.wasm"
+            value="./vendor/models/gemma-4-E2B-it-web.task"
           />
         </label>
 
         <label class="control-field">
           <span>AI Temp</span>
-          <input id="ai-temperature-input" type="number" min="0" max="2" step="0.1" value="0.2" />
+          <input id="ai-temperature-input" type="number" min="0" max="2" step="0.1" value="0.1" />
+        </label>
+
+        <label class="control-field">
+          <span>AI Top K</span>
+          <input id="ai-top-k-input" type="number" min="1" max="40" step="1" value="1" />
         </label>
 
         <label class="control-field">
           <span>AI Max Tokens</span>
-          <input id="ai-max-tokens-input" type="number" min="32" max="256" step="1" value="96" />
+          <input id="ai-max-tokens-input" type="number" min="64" max="2048" step="1" value="256" />
         </label>
 
         <label class="control-field">
@@ -190,14 +168,22 @@
                 <strong id="ai-mode-value">Random</strong>
               </div>
               <div class="summary-item">
-                <span class="summary-label">Model Cache</span>
-                <strong id="ai-cache-value">IndexedDB</strong>
+                <span class="summary-label">Model Asset</span>
+                <strong id="ai-cache-value">-</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Last Source</span>
+                <strong id="ai-last-source-value">-</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Last Latency</span>
+                <strong id="ai-last-latency-value">-</strong>
               </div>
             </div>
 
             <div class="ai-status-block">
               <p id="ai-status-line" class="ai-line">AI idle. Random play remains available.</p>
-              <p id="cache-status-line" class="ai-line">Cache status unknown.</p>
+              <p id="cache-status-line" class="ai-line">Model asset status unknown.</p>
               <p id="storage-status-line" class="ai-line">Persistent storage not requested yet.</p>
             </div>
 
@@ -205,6 +191,10 @@
               <div class="summary-item">
                 <span class="summary-label">AI Turns</span>
                 <strong id="metric-total-turns">0</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Forced Moves</span>
+                <strong id="metric-forced-moves">0</strong>
               </div>
               <div class="summary-item">
                 <span class="summary-label">Valid JSON</span>
@@ -221,8 +211,8 @@
             </div>
 
             <div class="button-row ai-button-row">
-              <button id="clear-ai-cache-button" class="button button-sand" disabled>
-                Clear Model Cache
+              <button id="unload-ai-button" class="button button-sand" disabled>
+                Unload AI
               </button>
               <button id="reset-metrics-button" class="button button-sand" disabled>
                 Reset Metrics

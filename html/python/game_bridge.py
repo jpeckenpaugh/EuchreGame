@@ -78,7 +78,12 @@ class GameBridge:
         self._log(self._describe_event(event))
         return self.snapshot()
 
-    def apply_move_token(self, move_token: str, reason: str | None = None) -> dict[str, Any]:
+    def apply_move_token(
+        self,
+        move_token: str,
+        reason: str | None = None,
+        source_label: str = "AI",
+    ) -> dict[str, Any]:
         game = self._require_game()
         if game.phase == Phase.HAND_COMPLETE:
             raise IllegalMoveError("Cannot apply a move token while the hand is complete.")
@@ -103,7 +108,8 @@ class GameBridge:
             compact_reason = " ".join(reason.strip().split())
             if compact_reason:
                 reason_suffix = f" Reason: {compact_reason[:180]}"
-        self._log(f"AI selected {normalized_token}.{reason_suffix}")
+        source_prefix = " ".join(source_label.strip().split()) or "AI"
+        self._log(f"{source_prefix} selected {normalized_token}.{reason_suffix}")
         self._log(self._describe_event(event))
         return self.snapshot()
 
@@ -353,6 +359,7 @@ def call_from_js(command: str, payload_json: str = "{}") -> str:
             data = BRIDGE.apply_move_token(
                 move_token=str(payload.get("move_token", "")),
                 reason=_maybe_str(payload.get("reason")),
+                source_label=_maybe_str(payload.get("source_label")) or "AI",
             )
         elif command == "get_ai_context":
             data = BRIDGE.get_ai_context()

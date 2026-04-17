@@ -3,18 +3,17 @@ export const DEFAULT_SETTINGS = {
   autoSpeed: "700",
   playMode: "random",
   winningScore: 10,
-  aiModelId: "Gemma-4-2B-IT-INT4-Local",
-  aiModelPath: "./vendor/models/gemma-4-2b-it-int4/",
-  aiModelLib: "./vendor/model-libs/gemma-4-2b-it-int4-webgpu.wasm",
-  aiUseIndexedDBCache: true,
-  aiTemperature: 0.2,
-  aiMaxTokens: 96,
+  aiModelPath: "./vendor/models/gemma-4-E2B-it-web.task",
+  aiTemperature: 0.1,
+  aiTopK: 1,
+  aiMaxTokens: 256,
   aiSeed: "",
   aiAutoFallback: true,
 };
 
 export const DEFAULT_METRICS = {
   total_turns: 0,
+  forced_move_count: 0,
   valid_json_count: 0,
   legal_move_count: 0,
   fallback_count: 0,
@@ -28,8 +27,10 @@ export const DEFAULT_SESSION = {
   last_summary: null,
   last_logs: [],
   ai_status: "AI idle.",
-  ai_cache_status: "Cache status unknown.",
+  ai_cache_status: "Model asset status unknown.",
   storage_status: "Persistent storage not requested yet.",
+  last_move_source: "-",
+  last_ai_latency_ms: null,
   model_cache: null,
   updated_at: null,
 };
@@ -115,4 +116,3 @@ export async function saveSession(db, session) {
   const payload = { ...session, updated_at: new Date().toISOString() };
   await writeRecord(db, STORE_SESSION, "latest", payload);
 }
-

@@ -23,7 +23,7 @@ The initial implementation includes:
 - pytest coverage for core behaviors
 - a smoke-test script that plays through a hand end to end
 - a browser-based HTML sandbox that runs the Python engine through Pyodide
-- optional AI-driven browser play using a locally hosted WebLLM model path
+- optional AI-driven browser play using a locally hosted Gemma 4 LiteRT model asset
 - IndexedDB-backed persistence for browser settings, baseline metrics, and session metadata
 
 ## Rule Assumptions
@@ -117,15 +117,24 @@ The UI architecture is documented in [docs/ARCHITECTURE.md](/Users/jarad/git/Euc
 
 ### Local AI Mode
 
-The browser UI now includes an optional Gemma/WebLLM path that:
+The browser UI now includes an optional Gemma/LiteRT path that:
 
-- loads WebLLM from a vendored local runtime under `html/vendor/web-llm/`
-- expects model assets under ignored local folders in `html/vendor/models/` and `html/vendor/model-libs/`
+- loads MediaPipe GenAI from a vendored local runtime under `html/vendor/tasks-genai/`
+- expects a local `.task` or `.litertlm` model asset under the ignored `html/vendor/models/` folder
 - uses IndexedDB-backed persistence for browser settings, AI baseline metrics, and session metadata
-- can also configure WebLLM to cache model artifacts in IndexedDB between page loads
+- keeps the large model binary out of git while still serving it locally through `http.server`
 
 Large model binaries are intentionally kept out of git. Setup details are in
 [docs/LOCAL_MODEL_SETUP.md](/Users/jarad/git/EuchreGame/docs/LOCAL_MODEL_SETUP.md).
+
+To fetch the default Gemma 4 E2B browser model into the ignored local path:
+
+```bash
+./scripts/download_gemma_model.sh
+```
+
+That script downloads to `html/vendor/models/gemma-4-E2B-it-web.task`, verifies the pinned
+SHA-256 for the default E2B asset, and leaves the file untracked by git.
 
 ## Minimal Example
 
@@ -157,8 +166,8 @@ console errors when served from `python3 -m http.server`.
 For AI verification, the UI should:
 
 - stay fully usable in random mode when local model assets are absent
-- show a clear missing-asset error when `Load AI` is pressed without local Gemma artifacts
-- load and cache the configured model once the local paths are populated correctly
+- show a clear missing-asset error when `Load AI` is pressed without `html/vendor/models/gemma-4-E2B-it-web.task`
+- load the configured local LiteRT model once the file path is populated correctly
 
 ## Next Work
 
