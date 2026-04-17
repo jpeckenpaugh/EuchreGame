@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EuchreGame Browser Sandbox</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script src="./vendor/pyodide/pyodide.js"></script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Browser Sandbox</p>
+          <h1>EuchreGame in the Browser</h1>
+          <p class="hero-copy">
+            This UI runs the local Python engine inside Pyodide, steps through random legal moves,
+            and lets you inspect the full table state or a masked player view.
+          </p>
+        </div>
+        <div class="hero-status">
+          <span id="status-pill" class="status-pill status-loading">Loading Pyodide</span>
+          <p id="status-text" class="status-text">Bootstrapping the browser runtime.</p>
+        </div>
+      </header>
+
+      <section class="control-strip">
+        <label class="control-field">
+          <span>Seed</span>
+          <input id="seed-input" type="number" inputmode="numeric" placeholder="Random" />
+        </label>
+
+        <label class="control-field">
+          <span>View</span>
+          <select id="view-select">
+            <option value="god">God View</option>
+            <option value="seat:0">Player 0</option>
+            <option value="seat:1">Player 1</option>
+            <option value="seat:2">Player 2</option>
+            <option value="seat:3">Player 3</option>
+          </select>
+        </label>
+
+        <label class="control-field">
+          <span>Auto Speed</span>
+          <select id="speed-select">
+            <option value="1100">Slow</option>
+            <option value="700" selected>Normal</option>
+            <option value="350">Fast</option>
+          </select>
+        </label>
+
+        <div class="button-row">
+          <button id="new-match-button" class="button button-primary" disabled>New Match</button>
+          <button id="next-move-button" class="button" disabled>Next Move</button>
+          <button id="auto-play-button" class="button button-ghost" disabled>Auto Play</button>
+        </div>
+      </section>
+
+      <main class="arena">
+        <aside class="side-card summary-card">
+          <div class="card-header">
+            <p class="eyebrow">Match State</p>
+            <h2>Table Summary</h2>
+          </div>
+
+          <div class="summary-grid">
+            <div class="summary-item">
+              <span class="summary-label">Phase</span>
+              <strong id="phase-value">-</strong>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Hand</span>
+              <strong id="hand-value">-</strong>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Trump</span>
+              <strong id="trump-value">-</strong>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Upcard</span>
+              <strong id="upcard-value">-</strong>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Dealer</span>
+              <strong id="dealer-value">-</strong>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Current Player</span>
+              <strong id="current-player-value">-</strong>
+            </div>
+          </div>
+
+          <section class="scoreboard">
+            <div class="team-score team-zero">
+              <span class="team-name">North / South</span>
+              <strong id="score-team-0">0</strong>
+              <span id="tricks-team-0" class="team-meta">0 tricks</span>
+            </div>
+            <div class="team-score team-one">
+              <span class="team-name">East / West</span>
+              <strong id="score-team-1">0</strong>
+              <span id="tricks-team-1" class="team-meta">0 tricks</span>
+            </div>
+          </section>
+
+          <section class="legal-box">
+            <p class="legal-label">Legal moves for the acting player</p>
+            <div id="legal-moves" class="legal-pills"></div>
+          </section>
+        </aside>
+
+        <section class="table-card">
+          <div class="felt-board">
+            <div id="seat-0" class="seat-panel seat-top"></div>
+            <div id="seat-1" class="seat-panel seat-right"></div>
+            <div id="seat-2" class="seat-panel seat-bottom"></div>
+            <div id="seat-3" class="seat-panel seat-left"></div>
+
+            <div class="center-well">
+              <div class="center-header">
+                <div>
+                  <p class="eyebrow">Center Table</p>
+                  <h2>Current Trick</h2>
+                </div>
+                <div class="center-chip">
+                  <span>Viewer</span>
+                  <strong id="viewer-label">God View</strong>
+                </div>
+              </div>
+
+              <div class="center-details">
+                <div class="upcard-stack">
+                  <span class="stack-label">Upcard</span>
+                  <div id="upcard-card" class="card-slot"></div>
+                </div>
+                <div class="upcard-stack">
+                  <span class="stack-label">Last Event</span>
+                  <p id="last-message" class="last-message">Waiting for runtime.</p>
+                </div>
+              </div>
+
+              <div id="trick-grid" class="trick-grid"></div>
+            </div>
+          </div>
+        </section>
+
+        <aside class="side-card log-card">
+          <div class="card-header">
+            <p class="eyebrow">Event Feed</p>
+            <h2>Game Log</h2>
+          </div>
+          <ol id="log-list" class="log-list" aria-live="polite"></ol>
+        </aside>
+      </main>
+    </div>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
