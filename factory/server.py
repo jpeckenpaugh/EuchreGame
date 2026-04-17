@@ -204,8 +204,12 @@ def log_tail(job_id: str, max_lines: int = 120) -> list[str]:
     return lines[-max_lines:]
 
 
+def has_tracking_db() -> bool:
+    return DB_PATH.exists()
+
+
 def open_connection() -> sqlite3.Connection:
-    if not DB_PATH.exists():
+    if not has_tracking_db():
         raise HTTPException(status_code=404, detail="SQLite tracking database not found.")
     connection = sqlite3.connect(DB_PATH)
     connection.row_factory = sqlite3.Row
@@ -493,6 +497,8 @@ def get_job(job_id: str) -> dict[str, Any]:
 
 @app.get("/api/runs")
 def list_runs(limit: int = Query(default=25, ge=1, le=200)) -> dict[str, Any]:
+    if not has_tracking_db():
+        return {"runs": []}
     with open_connection() as connection:
         rows = fetch_all(
             connection,
@@ -516,11 +522,15 @@ def list_runs(limit: int = Query(default=25, ge=1, le=200)) -> dict[str, Any]:
 
 @app.get("/api/runs/{run_id}")
 def get_run(run_id: str) -> dict[str, Any]:
+    if not has_tracking_db():
+        raise HTTPException(status_code=404, detail="Run not found.")
     return load_run_detail(run_id)
 
 
 @app.get("/api/runs/{run_id}/games")
 def get_run_games(run_id: str) -> dict[str, Any]:
+    if not has_tracking_db():
+        return {"run_id": run_id, "games": []}
     detail = load_run_detail(run_id)
     return {"run_id": run_id, "games": detail["games"]}
 
@@ -530,6 +540,8 @@ def get_run_failures(
     run_id: str,
     limit: int = Query(default=100, ge=1, le=500),
 ) -> dict[str, Any]:
+    if not has_tracking_db():
+        return {"run_id": run_id, "items": [], "counts": {}, "total": 0}
     with open_connection() as connection:
         run_row = fetch_one(
             connection,
@@ -544,6 +556,8 @@ def get_run_failures(
 
 @app.get("/api/games/{game_id}")
 def get_game(game_id: str) -> dict[str, Any]:
+    if not has_tracking_db():
+        raise HTTPException(status_code=404, detail="Game not found.")
     with open_connection() as connection:
         game = fetch_one(
             connection,
