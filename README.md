@@ -184,6 +184,18 @@ Example benchmark run for `100` decision responses:
 This writes a benchmark folder under `factory/output/benchmarks/` containing the raw responses,
 validated rows, gold dataset, and benchmark summary metrics.
 
+### Current Benchmark Notes
+
+On the local AMD Windows system used for this repo, the current early benchmark results suggest:
+
+- `concurrency=1` is the best default for long runs
+- `concurrency=2` remained stable, but did not produce a meaningful throughput gain
+- forcing higher local concurrency increased per-request latency substantially without a matching
+  overall speedup
+
+For that reason, benchmark and production teacher-data runs should currently default to
+`--concurrency 1` unless new measurements show a clear improvement.
+
 ## HTML Web UI
 
 The repository also includes a browser sandbox under `html/` that runs the local Python

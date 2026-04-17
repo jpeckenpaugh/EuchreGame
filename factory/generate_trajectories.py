@@ -34,12 +34,14 @@ def process_scenarios(
     timeout_s: float,
     retries: int,
     concurrency: int = 1,
+    api_style: str = "ollama",
 ) -> list[dict[str, Any]]:
     from factory.common import (
         PROMPT_VERSION,
         build_teacher_prompt,
         compact_state_from_masked_state,
         ollama_generate,
+        openai_chat_generate,
     )
 
     def process_one(scenario: dict[str, Any]) -> dict[str, Any]:
@@ -48,24 +50,42 @@ def process_scenarios(
         base_row = {
             "scenario": scenario,
             "model": model,
+            "api_style": api_style,
             "prompt_version": PROMPT_VERSION,
             "compact_state": compact_state,
             "prompt": prompt,
         }
         try:
-            response = ollama_generate(
-                model=model,
-                prompt=prompt,
-                host=host,
-                timeout_s=timeout_s,
-                retries=retries,
-            )
-            model_text = str(response.get("response", ""))
+            if api_style == "openai":
+                response = openai_chat_generate(
+                    model=model,
+                    prompt=prompt,
+                    host=host,
+                    timeout_s=timeout_s,
+                    retries=retries,
+                )
+                choices = response.get("choices", [])
+                first_choice = choices[0] if choices else {}
+                message = (
+                    first_choice.get("message", {})
+                    if isinstance(first_choice, dict)
+                    else {}
+                )
+                model_text = str(message.get("content", ""))
+            else:
+                response = ollama_generate(
+                    model=model,
+                    prompt=prompt,
+                    host=host,
+                    timeout_s=timeout_s,
+                    retries=retries,
+                )
+                model_text = str(response.get("response", ""))
             parsed_response, parse_error = parse_model_response(model_text)
             return {
                 **base_row,
                 "raw_response_text": model_text,
-                "ollama_response": response,
+                "backend_response": response,
                 "parsed_response": parsed_response,
                 "parse_error": parse_error,
                 "transport_error": None,
@@ -74,7 +94,7 @@ def process_scenarios(
             return {
                 **base_row,
                 "raw_response_text": "",
-                "ollama_response": None,
+                "backend_response": None,
                 "parsed_response": None,
                 "parse_error": "transport_error",
                 "transport_error": str(exc),
@@ -93,6 +113,27 @@ def process_scenarios(
             rows[futures[future]] = future.result()
 
     return [row for row in rows if row is not None]
+
+
+def process_scenario(
+    *,
+    scenario: dict[str, Any],
+    model: str,
+    host: str,
+    timeout_s: float,
+    retries: int,
+    api_style: str = "ollama",
+) -> dict[str, Any]:
+    rows = process_scenarios(
+        scenarios=[scenario],
+        model=model,
+        host=host,
+        timeout_s=timeout_s,
+        retries=retries,
+        concurrency=1,
+        api_style=api_style,
+    )
+    return rows[0]
 
 
 def parse_args() -> argparse.Namespace:
@@ -139,6 +180,12 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Number of concurrent inference workers.",
     )
+    parser.add_argument(
+        "--api-style",
+        choices=("ollama", "openai"),
+        default="ollama",
+        help="Backend API style.",
+    )
     return parser.parse_args()
 
 
@@ -160,6 +207,7 @@ def main() -> None:
         timeout_s=args.timeout,
         retries=args.retries,
         concurrency=args.concurrency,
+        api_style=args.api_style,
     )
 
     if args.output.exists():

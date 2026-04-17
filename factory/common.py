@@ -189,3 +189,46 @@ def ollama_generate(
     raise RuntimeError(
         f"Ollama request failed after {retries + 1} attempts: {last_error}"
     ) from last_error
+
+
+def openai_chat_generate(
+    *,
+    model: str,
+    prompt: str,
+    host: str,
+    timeout_s: float,
+    retries: int,
+    temperature: float = 0.2,
+) -> dict[str, Any]:
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": temperature,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        f"{host.rstrip('/')}/v1/chat/completions",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    last_error: Exception | None = None
+    for attempt in range(retries + 1):
+        started = time.perf_counter()
+        try:
+            with urllib.request.urlopen(request, timeout=timeout_s) as response:
+                body = response.read().decode("utf-8")
+            parsed = json.loads(body)
+            parsed["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
+            parsed["attempt"] = attempt + 1
+            return parsed
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            last_error = exc
+            if attempt >= retries:
+                break
+            time.sleep(1 + attempt)
+
+    raise RuntimeError(
+        f"OpenAI-compatible request failed after {retries + 1} attempts: {last_error}"
+    ) from last_error
