@@ -13,4 +13,9 @@ dist/
 .DS_Store
 .idea/
 .vscode/
-
+html/vendor/models/*
+!html/vendor/models/.gitkeep
+!html/vendor/models/README.md
+html/vendor/model-libs/*
+!html/vendor/model-libs/.gitkeep
+!html/vendor/model-libs/README.md

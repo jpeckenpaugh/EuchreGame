@@ -171,6 +171,11 @@ body::after {
   min-width: 150px;
 }
 
+.control-wide {
+  min-width: min(320px, 100%);
+  flex: 1 1 320px;
+}
+
 .control-field span {
   font-size: 0.85rem;
   letter-spacing: 0.08em;
@@ -212,6 +217,11 @@ body::after {
     opacity 120ms ease;
 }
 
+.button-sand {
+  background: rgba(17, 63, 103, 0.12);
+  color: var(--ink);
+}
+
 .button:hover:not(:disabled) {
   transform: translateY(-1px);
 }
@@ -238,6 +248,25 @@ body::after {
   margin-top: 18px;
 }
 
+.ai-strip {
+  align-items: center;
+}
+
+.control-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(245, 239, 226, 0.16);
+}
+
+.control-check input {
+  width: 18px;
+  height: 18px;
+}
+
 .side-card,
 .table-card {
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -253,6 +282,10 @@ body::after {
 
 .card-header {
   margin-bottom: 16px;
+}
+
+.card-header.compact {
+  margin-bottom: 12px;
 }
 
 .card-header h2,
@@ -314,6 +347,41 @@ body::after {
 
 .legal-box {
   margin-top: 18px;
+}
+
+.ai-box {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(17, 63, 103, 0.12);
+}
+
+.ai-summary-grid {
+  margin-top: 8px;
+}
+
+.ai-status-block {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  background: rgba(17, 63, 103, 0.08);
+}
+
+.ai-line {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.ai-line + .ai-line {
+  margin-top: 8px;
+}
+
+.metrics-grid {
+  margin-top: 14px;
+}
+
+.ai-button-row {
+  margin-top: 14px;
+  margin-left: 0;
 }
 
 .legal-pills {

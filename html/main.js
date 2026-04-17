@@ -1,12 +1,36 @@
+import * as webllm from "./vendor/web-llm/index.js";
+import {
+  DEFAULT_METRICS,
+  DEFAULT_SESSION,
+  DEFAULT_SETTINGS,
+  loadPersistedState,
+  openSandboxDB,
+  saveMetrics,
+  saveSession,
+  saveSettings,
+} from "./browser_db.js";
+
 const elements = {
   statusPill: document.querySelector("#status-pill"),
   statusText: document.querySelector("#status-text"),
   seedInput: document.querySelector("#seed-input"),
   viewSelect: document.querySelector("#view-select"),
   speedSelect: document.querySelector("#speed-select"),
+  modeSelect: document.querySelector("#mode-select"),
+  cacheSelect: document.querySelector("#cache-select"),
+  modelIdInput: document.querySelector("#model-id-input"),
+  modelPathInput: document.querySelector("#model-path-input"),
+  modelLibInput: document.querySelector("#model-lib-input"),
+  aiTemperatureInput: document.querySelector("#ai-temperature-input"),
+  aiMaxTokensInput: document.querySelector("#ai-max-tokens-input"),
+  aiSeedInput: document.querySelector("#ai-seed-input"),
+  aiFallbackCheckbox: document.querySelector("#ai-fallback-checkbox"),
   newMatchButton: document.querySelector("#new-match-button"),
   nextMoveButton: document.querySelector("#next-move-button"),
   autoPlayButton: document.querySelector("#auto-play-button"),
+  loadAiButton: document.querySelector("#load-ai-button"),
+  clearAiCacheButton: document.querySelector("#clear-ai-cache-button"),
+  resetMetricsButton: document.querySelector("#reset-metrics-button"),
   phaseValue: document.querySelector("#phase-value"),
   handValue: document.querySelector("#hand-value"),
   trumpValue: document.querySelector("#trump-value"),
@@ -23,18 +47,45 @@ const elements = {
   lastMessage: document.querySelector("#last-message"),
   trickGrid: document.querySelector("#trick-grid"),
   logList: document.querySelector("#log-list"),
+  aiModeValue: document.querySelector("#ai-mode-value"),
+  aiCacheValue: document.querySelector("#ai-cache-value"),
+  aiStatusLine: document.querySelector("#ai-status-line"),
+  cacheStatusLine: document.querySelector("#cache-status-line"),
+  storageStatusLine: document.querySelector("#storage-status-line"),
+  metricTotalTurns: document.querySelector("#metric-total-turns"),
+  metricValidJson: document.querySelector("#metric-valid-json"),
+  metricLegalMoves: document.querySelector("#metric-legal-moves"),
+  metricFallbacks: document.querySelector("#metric-fallbacks"),
   seats: [0, 1, 2, 3].map((seat) => document.querySelector(`#seat-${seat}`)),
 };
 
 const seatNames = ["North", "East", "South", "West"];
 const suitSymbols = { C: "♣", D: "♦", H: "♥", S: "♠" };
 const suitNames = { C: "Clubs", D: "Diamonds", H: "Hearts", S: "Spades" };
+const AI_JSON_SCHEMA = JSON.stringify({
+  type: "object",
+  properties: {
+    move: { type: "string" },
+    reason: { type: "string" },
+  },
+  required: ["move", "reason"],
+  additionalProperties: false,
+});
 
 const runtimeState = {
   pyodide: null,
   bridgeModule: null,
   autoRunning: false,
   currentSnapshot: null,
+  db: null,
+  settings: { ...DEFAULT_SETTINGS },
+  metrics: { ...DEFAULT_METRICS },
+  session: { ...DEFAULT_SESSION },
+  aiEngine: null,
+  aiLoadPromise: null,
+  aiLoadedFingerprint: null,
+  aiStatusTone: "ready",
+  sessionPersistTimer: null,
 };
 
 function formatError(error) {
@@ -74,7 +125,7 @@ function setStatus(message, tone = "loading") {
   elements.statusText.textContent = message;
   elements.statusPill.className = `status-pill status-${tone}`;
   elements.statusPill.textContent =
-    tone === "ready" ? "Ready" : tone === "error" ? "Runtime Error" : "Loading Pyodide";
+    tone === "ready" ? "Ready" : tone === "error" ? "Runtime Error" : "Loading";
 }
 
 function parseViewSelection() {
@@ -217,6 +268,36 @@ function renderLogs(logs) {
   elements.logList.scrollTop = elements.logList.scrollHeight;
 }
 
+function formatPercent(numerator, denominator) {
+  if (!denominator) {
+    return "0%";
+  }
+  return `${Math.round((numerator / denominator) * 100)}%`;
+}
+
+function renderAiPanel() {
+  elements.aiModeValue.textContent =
+    runtimeState.settings.playMode === "ai" ? "Gemma AI" : "Random";
+  elements.aiCacheValue.textContent = runtimeState.settings.aiUseIndexedDBCache
+    ? "IndexedDB"
+    : "Cache API";
+  elements.aiStatusLine.textContent = runtimeState.session.ai_status;
+  elements.cacheStatusLine.textContent = runtimeState.session.ai_cache_status;
+  elements.storageStatusLine.textContent = runtimeState.session.storage_status;
+  elements.metricTotalTurns.textContent = String(runtimeState.metrics.total_turns);
+  elements.metricValidJson.textContent = formatPercent(
+    runtimeState.metrics.valid_json_count,
+    runtimeState.metrics.total_turns,
+  );
+  elements.metricLegalMoves.textContent = formatPercent(
+    runtimeState.metrics.legal_move_count,
+    runtimeState.metrics.total_turns,
+  );
+  elements.metricFallbacks.textContent = String(runtimeState.metrics.fallback_count);
+  elements.loadAiButton.textContent =
+    runtimeState.aiLoadPromise != null ? "Loading AI..." : "Load AI";
+}
+
 function renderSnapshot(snapshot) {
   runtimeState.currentSnapshot = snapshot;
   const summary = snapshot.summary;
@@ -250,14 +331,19 @@ function renderSnapshot(snapshot) {
   renderTrick(snapshot);
   renderLegalMoves(snapshot.legal_moves);
   renderLogs(snapshot.logs);
+  renderAiPanel();
 
   elements.autoPlayButton.textContent = runtimeState.autoRunning ? "Pause" : "Auto Play";
+  schedulePersistSession();
 }
 
 function setControlsEnabled(enabled) {
   elements.newMatchButton.disabled = !enabled;
   elements.nextMoveButton.disabled = !enabled;
   elements.autoPlayButton.disabled = !enabled;
+  elements.loadAiButton.disabled = !enabled;
+  elements.clearAiCacheButton.disabled = !enabled;
+  elements.resetMetricsButton.disabled = !enabled;
 }
 
 async function callBridge(command, payload = {}) {
@@ -346,6 +432,251 @@ importlib.reload(game_bridge)
   }
 }
 
+function setAiStatus(message, tone = "ready") {
+  runtimeState.session.ai_status = message;
+  runtimeState.aiStatusTone = tone;
+  renderAiPanel();
+  void persistSession();
+}
+
+function schedulePersistSession() {
+  if (!runtimeState.db) {
+    return;
+  }
+
+  if (runtimeState.sessionPersistTimer != null) {
+    window.clearTimeout(runtimeState.sessionPersistTimer);
+  }
+
+  runtimeState.sessionPersistTimer = window.setTimeout(() => {
+    runtimeState.sessionPersistTimer = null;
+    void persistSession();
+  }, 200);
+}
+
+async function persistSession() {
+  if (!runtimeState.db) {
+    return;
+  }
+
+  const snapshot = runtimeState.currentSnapshot;
+  runtimeState.session.last_summary = snapshot?.summary ?? null;
+  runtimeState.session.last_logs = snapshot?.logs?.slice(-20) ?? [];
+  await saveSession(runtimeState.db, runtimeState.session);
+}
+
+async function persistSettings() {
+  if (!runtimeState.db) {
+    return;
+  }
+  await saveSettings(runtimeState.db, runtimeState.settings);
+}
+
+async function persistMetrics() {
+  if (!runtimeState.db) {
+    return;
+  }
+  await saveMetrics(runtimeState.db, runtimeState.metrics);
+}
+
+function applySettingsToControls() {
+  elements.viewSelect.value = runtimeState.settings.selectedView;
+  elements.speedSelect.value = runtimeState.settings.autoSpeed;
+  elements.modeSelect.value = runtimeState.settings.playMode;
+  elements.cacheSelect.value = runtimeState.settings.aiUseIndexedDBCache ? "indexeddb" : "cache";
+  elements.modelIdInput.value = runtimeState.settings.aiModelId;
+  elements.modelPathInput.value = runtimeState.settings.aiModelPath;
+  elements.modelLibInput.value = runtimeState.settings.aiModelLib;
+  elements.aiTemperatureInput.value = String(runtimeState.settings.aiTemperature);
+  elements.aiMaxTokensInput.value = String(runtimeState.settings.aiMaxTokens);
+  elements.aiSeedInput.value = runtimeState.settings.aiSeed;
+  elements.aiFallbackCheckbox.checked = runtimeState.settings.aiAutoFallback;
+}
+
+function sanitizeTextInput(value, { trailingSlash = false } = {}) {
+  let normalized = value.trim();
+  if (trailingSlash && normalized && !normalized.endsWith("/")) {
+    normalized += "/";
+  }
+  return normalized;
+}
+
+function readSettingsFromControls() {
+  runtimeState.settings = {
+    ...runtimeState.settings,
+    selectedView: elements.viewSelect.value,
+    autoSpeed: elements.speedSelect.value,
+    playMode: elements.modeSelect.value,
+    aiUseIndexedDBCache: elements.cacheSelect.value === "indexeddb",
+    aiModelId: sanitizeTextInput(elements.modelIdInput.value),
+    aiModelPath: sanitizeTextInput(elements.modelPathInput.value, { trailingSlash: true }),
+    aiModelLib: sanitizeTextInput(elements.modelLibInput.value),
+    aiTemperature: Number.parseFloat(elements.aiTemperatureInput.value) || 0.2,
+    aiMaxTokens: Number.parseInt(elements.aiMaxTokensInput.value, 10) || 96,
+    aiSeed: elements.aiSeedInput.value.trim(),
+    aiAutoFallback: elements.aiFallbackCheckbox.checked,
+  };
+  renderAiPanel();
+}
+
+function resolveAssetUrl(value) {
+  return new URL(value, import.meta.url).href;
+}
+
+function buildAiConfig() {
+  const settings = runtimeState.settings;
+  const modelUrl = resolveAssetUrl(settings.aiModelPath);
+  const modelLibUrl = resolveAssetUrl(settings.aiModelLib);
+  const appConfig = {
+    model_list: [
+      {
+        model: modelUrl,
+        model_id: settings.aiModelId,
+        model_lib: modelLibUrl,
+      },
+    ],
+    useIndexedDBCache: settings.aiUseIndexedDBCache,
+  };
+
+  return { appConfig, modelUrl, modelLibUrl };
+}
+
+function currentAiFingerprint() {
+  const settings = runtimeState.settings;
+  return JSON.stringify({
+    modelId: settings.aiModelId,
+    modelPath: settings.aiModelPath,
+    modelLib: settings.aiModelLib,
+    useIndexedDBCache: settings.aiUseIndexedDBCache,
+  });
+}
+
+async function fetchOk(url, init) {
+  const response = await fetch(url, init);
+  if (!response.ok) {
+    throw new Error(`Missing required local asset at ${url} (${response.status})`);
+  }
+}
+
+async function verifyLocalModelAssets() {
+  const { modelUrl, modelLibUrl } = buildAiConfig();
+  const configUrl = new URL("mlc-chat-config.json", modelUrl).href;
+  await fetchOk(configUrl, { method: "GET" });
+  await fetchOk(modelLibUrl, { method: "HEAD" });
+}
+
+async function ensureStoragePersistence() {
+  if (!navigator.storage?.persisted) {
+    runtimeState.session.storage_status = "Persistent storage API unavailable in this browser.";
+    renderAiPanel();
+    return;
+  }
+
+  const alreadyPersisted = await navigator.storage.persisted();
+  if (alreadyPersisted) {
+    runtimeState.session.storage_status = "Persistent browser storage is enabled.";
+    renderAiPanel();
+    return;
+  }
+
+  if (!navigator.storage.persist) {
+    runtimeState.session.storage_status = "Persistent storage cannot be requested here.";
+    renderAiPanel();
+    return;
+  }
+
+  const granted = await navigator.storage.persist();
+  runtimeState.session.storage_status = granted
+    ? "Persistent browser storage granted."
+    : "Persistent browser storage request was not granted.";
+  renderAiPanel();
+}
+
+async function updateModelCacheStatus(appConfig) {
+  const cached = await webllm.hasModelInCache(runtimeState.settings.aiModelId, appConfig);
+  runtimeState.session.ai_cache_status = cached
+    ? `Model artifacts are cached in ${
+        runtimeState.settings.aiUseIndexedDBCache ? "IndexedDB" : "the Cache API"
+      }.`
+    : `Model artifacts are not cached yet in ${
+        runtimeState.settings.aiUseIndexedDBCache ? "IndexedDB" : "the Cache API"
+      }.`;
+  renderAiPanel();
+}
+
+async function unloadAiEngine() {
+  if (!runtimeState.aiEngine) {
+    return;
+  }
+  try {
+    await runtimeState.aiEngine.unload();
+  } catch {
+    // Ignore unload issues; a subsequent reload will replace the instance.
+  }
+  runtimeState.aiEngine = null;
+  runtimeState.aiLoadedFingerprint = null;
+}
+
+async function loadAiEngine(forceReload = false) {
+  readSettingsFromControls();
+  const fingerprint = currentAiFingerprint();
+  if (
+    runtimeState.aiEngine &&
+    runtimeState.aiLoadedFingerprint === fingerprint &&
+    !forceReload
+  ) {
+    return runtimeState.aiEngine;
+  }
+
+  if (runtimeState.aiLoadPromise && !forceReload) {
+    return runtimeState.aiLoadPromise;
+  }
+
+  runtimeState.aiLoadPromise = (async () => {
+    const { appConfig } = buildAiConfig();
+    await ensureStoragePersistence();
+    setAiStatus(`Checking local assets for ${runtimeState.settings.aiModelId}...`, "loading");
+    await verifyLocalModelAssets();
+    await updateModelCacheStatus(appConfig);
+    await unloadAiEngine();
+
+    setAiStatus(`Loading AI model ${runtimeState.settings.aiModelId}...`, "loading");
+    setStatus("Loading AI brain from local assets.", "loading");
+
+    const engine = await webllm.CreateMLCEngine(runtimeState.settings.aiModelId, {
+      appConfig,
+      initProgressCallback: (progress) => {
+        const message = progress?.text ?? `Loading ${runtimeState.settings.aiModelId}...`;
+        runtimeState.session.ai_status = message;
+        renderAiPanel();
+        setStatus(message, "loading");
+      },
+    });
+
+    runtimeState.aiEngine = engine;
+    runtimeState.aiLoadedFingerprint = fingerprint;
+    const gpuVendor = await engine.getGPUVendor().catch(() => "Unknown GPU");
+    await updateModelCacheStatus(appConfig);
+    setAiStatus(`AI ready on ${gpuVendor}.`, "ready");
+    setStatus("Pyodide and AI are ready.", "ready");
+    return engine;
+  })().catch((error) => {
+    const errorMessage = formatError(error);
+    runtimeState.aiEngine = null;
+    runtimeState.aiLoadedFingerprint = null;
+    runtimeState.session.ai_cache_status = "AI cache unavailable because the model did not load.";
+    setAiStatus(errorMessage, "error");
+    setStatus(errorMessage, "error");
+    throw error;
+  }).finally(() => {
+    runtimeState.aiLoadPromise = null;
+    renderAiPanel();
+    schedulePersistSession();
+  });
+
+  return runtimeState.aiLoadPromise;
+}
+
 async function initializeRuntime() {
   setStatus("Loading the local Pyodide runtime.", "loading");
   const pyodide = await loadPyodide({
@@ -363,15 +694,21 @@ async function initializeRuntime() {
 }
 
 async function newMatch() {
+  readSettingsFromControls();
   const seedText = elements.seedInput.value.trim();
   const numericSeed = seedText === "" ? Math.floor(Date.now() % 10_000_000) : Number(seedText);
   elements.seedInput.value = Number.isFinite(numericSeed) ? String(numericSeed) : "";
   const snapshot = await callBridge("new_match", {
     seed: Number.isFinite(numericSeed) ? numericSeed : null,
-    winning_score: 10,
+    winning_score: runtimeState.settings.winningScore,
   });
   const refreshed = await callBridge("set_view", parseViewSelection());
   renderSnapshot(refreshed ?? snapshot);
+}
+
+async function refreshView() {
+  const snapshot = await callBridge("set_view", parseViewSelection());
+  renderSnapshot(snapshot);
 }
 
 async function stepRandom() {
@@ -382,39 +719,253 @@ async function stepRandom() {
   }
 }
 
-async function refreshView() {
-  const snapshot = await callBridge("set_view", parseViewSelection());
-  renderSnapshot(snapshot);
+function buildAiMessages(aiContext) {
+  return [
+    {
+      role: "system",
+      content:
+        "You are a Euchre move selector. Return JSON only. The `move` field must exactly match one token from Leg. Do not invent moves.",
+    },
+    {
+      role: "user",
+      content:
+        "Choose the single best legal move for the acting player.\n" +
+        `State: ${aiContext.compact_state}\n` +
+        'Return exactly: {"move":"TOKEN","reason":"brief explanation"}',
+    },
+  ];
+}
+
+function getCompletionText(completion) {
+  const content = completion?.choices?.[0]?.message?.content;
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") {
+          return part;
+        }
+        if (part && typeof part === "object" && "text" in part) {
+          return part.text;
+        }
+        return "";
+      })
+      .join("");
+  }
+  if (content && typeof content === "object") {
+    return JSON.stringify(content);
+  }
+  return "";
+}
+
+function parseAiJsonResponse(rawText) {
+  const parsed = JSON.parse(rawText);
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Model did not return a JSON object.");
+  }
+  const move = typeof parsed.move === "string" ? parsed.move.trim() : "";
+  const reason = typeof parsed.reason === "string" ? parsed.reason.trim() : "";
+  if (!move) {
+    throw new Error("Model response JSON did not include a non-empty move.");
+  }
+  return { move, reason };
+}
+
+function normalizeMoveToken(token) {
+  return token.trim().toUpperCase().replace(/\s+/g, "_").replace("CALL:", "CALL_");
+}
+
+async function recordAiFailure(kind, detail) {
+  runtimeState.metrics.fallback_count += 1;
+  if (kind === "invalid_json") {
+    runtimeState.metrics.invalid_json_count += 1;
+  } else if (kind === "illegal_move") {
+    runtimeState.metrics.illegal_move_count += 1;
+  } else if (kind === "engine_error") {
+    runtimeState.metrics.engine_error_count += 1;
+  }
+  await persistMetrics();
+
+  const shortDetail = detail.length > 220 ? `${detail.slice(0, 217)}...` : detail;
+  await callBridge("record_note", {
+    message: `AI fallback (${kind}): ${shortDetail}`,
+  });
+  runtimeState.session.ai_status = `AI fallback used: ${shortDetail}`;
+  renderAiPanel();
+}
+
+async function performFallback(kind, detail) {
+  await recordAiFailure(kind, detail);
+  if (!runtimeState.settings.aiAutoFallback) {
+    throw new Error(detail);
+  }
+  await stepRandom();
+}
+
+async function stepAi() {
+  const currentSnapshot =
+    runtimeState.currentSnapshot ?? (await callBridge("get_snapshot", parseViewSelection()));
+
+  if (currentSnapshot.summary.match_complete) {
+    runtimeState.autoRunning = false;
+    renderSnapshot(currentSnapshot);
+    return;
+  }
+
+  if (currentSnapshot.summary.phase === "hand_complete") {
+    await stepRandom();
+    return;
+  }
+
+  const aiContext = currentSnapshot.ai_context ?? (await callBridge("get_ai_context"));
+  if (!aiContext) {
+    await stepRandom();
+    return;
+  }
+
+  runtimeState.metrics.total_turns += 1;
+  await persistMetrics();
+  renderAiPanel();
+
+  let engine;
+  try {
+    engine = await loadAiEngine();
+  } catch (error) {
+    await performFallback("engine_error", formatError(error));
+    return;
+  }
+
+  let aiResponse;
+  try {
+    const completion = await engine.chat.completions.create({
+      messages: buildAiMessages(aiContext),
+      response_format: {
+        type: "json_object",
+        schema: AI_JSON_SCHEMA,
+      },
+      temperature: runtimeState.settings.aiTemperature,
+      max_tokens: runtimeState.settings.aiMaxTokens,
+      seed: runtimeState.settings.aiSeed
+        ? Number.parseInt(runtimeState.settings.aiSeed, 10)
+        : undefined,
+      model: runtimeState.settings.aiModelId,
+    });
+
+    const rawText = getCompletionText(completion);
+    aiResponse = parseAiJsonResponse(rawText);
+    runtimeState.metrics.valid_json_count += 1;
+    await persistMetrics();
+  } catch (error) {
+    await performFallback("invalid_json", formatError(error));
+    return;
+  }
+
+  try {
+    const snapshot = await callBridge("apply_move_token", {
+      move_token: normalizeMoveToken(aiResponse.move),
+      reason: aiResponse.reason,
+      ...parseViewSelection(),
+    });
+    runtimeState.metrics.legal_move_count += 1;
+    await persistMetrics();
+    runtimeState.session.ai_status = `AI selected ${normalizeMoveToken(aiResponse.move)} successfully.`;
+    renderSnapshot(snapshot);
+    if (snapshot.summary.match_complete) {
+      runtimeState.autoRunning = false;
+    }
+  } catch (error) {
+    await performFallback("illegal_move", formatError(error));
+  }
+}
+
+async function stepGame() {
+  readSettingsFromControls();
+  await persistSettings();
+
+  if (runtimeState.settings.playMode === "ai") {
+    await stepAi();
+  } else {
+    await stepRandom();
+  }
 }
 
 async function autoplayLoop() {
   while (runtimeState.autoRunning) {
-    await stepRandom();
+    await stepGame();
     if (!runtimeState.autoRunning) {
       break;
     }
-    const delay = Number.parseInt(elements.speedSelect.value, 10) || 700;
+    const delay = Number.parseInt(runtimeState.settings.autoSpeed, 10) || 700;
     await new Promise((resolve) => window.setTimeout(resolve, delay));
   }
+
   renderSnapshot(runtimeState.currentSnapshot ?? (await callBridge("get_snapshot", parseViewSelection())));
 }
 
+async function clearAiCache() {
+  readSettingsFromControls();
+  const { appConfig } = buildAiConfig();
+  await unloadAiEngine();
+  await webllm.deleteModelAllInfoInCache(runtimeState.settings.aiModelId, appConfig);
+  runtimeState.session.ai_cache_status = `Cleared cached artifacts for ${runtimeState.settings.aiModelId}.`;
+  renderAiPanel();
+  await persistSession();
+}
+
+async function resetMetrics() {
+  runtimeState.metrics = { ...DEFAULT_METRICS };
+  renderAiPanel();
+  await persistMetrics();
+}
+
+function markAiConfigDirty() {
+  runtimeState.aiLoadedFingerprint = null;
+}
+
 function bindEvents() {
+  const settingInputs = [
+    elements.viewSelect,
+    elements.speedSelect,
+    elements.modeSelect,
+    elements.cacheSelect,
+    elements.modelIdInput,
+    elements.modelPathInput,
+    elements.modelLibInput,
+    elements.aiTemperatureInput,
+    elements.aiMaxTokensInput,
+    elements.aiSeedInput,
+    elements.aiFallbackCheckbox,
+  ];
+
+  for (const element of settingInputs) {
+    element.addEventListener("change", async () => {
+      readSettingsFromControls();
+      markAiConfigDirty();
+      await persistSettings();
+      renderAiPanel();
+      if (element === elements.viewSelect && runtimeState.bridgeModule) {
+        await refreshView();
+      }
+    });
+  }
+
   elements.newMatchButton.addEventListener("click", async () => {
     runtimeState.autoRunning = false;
     try {
       await newMatch();
     } catch (error) {
-      setStatus(String(error), "error");
+      setStatus(formatError(error), "error");
     }
   });
 
   elements.nextMoveButton.addEventListener("click", async () => {
     runtimeState.autoRunning = false;
     try {
-      await stepRandom();
+      await stepGame();
     } catch (error) {
-      setStatus(String(error), "error");
+      setStatus(formatError(error), "error");
     }
   });
 
@@ -428,17 +979,43 @@ function bindEvents() {
       }
     } catch (error) {
       runtimeState.autoRunning = false;
-      setStatus(String(error), "error");
+      setStatus(formatError(error), "error");
     }
   });
 
-  elements.viewSelect.addEventListener("change", async () => {
+  elements.loadAiButton.addEventListener("click", async () => {
     try {
-      await refreshView();
-    } catch (error) {
-      setStatus(String(error), "error");
+      await loadAiEngine(true);
+    } catch {
+      // Error already surfaced in the UI.
     }
   });
+
+  elements.clearAiCacheButton.addEventListener("click", async () => {
+    try {
+      await clearAiCache();
+    } catch (error) {
+      setStatus(formatError(error), "error");
+    }
+  });
+
+  elements.resetMetricsButton.addEventListener("click", async () => {
+    try {
+      await resetMetrics();
+    } catch (error) {
+      setStatus(formatError(error), "error");
+    }
+  });
+}
+
+async function hydratePersistentState() {
+  runtimeState.db = await openSandboxDB();
+  const persisted = await loadPersistedState(runtimeState.db);
+  runtimeState.settings = { ...DEFAULT_SETTINGS, ...persisted.settings };
+  runtimeState.metrics = { ...DEFAULT_METRICS, ...persisted.metrics };
+  runtimeState.session = { ...DEFAULT_SESSION, ...persisted.session };
+  applySettingsToControls();
+  renderAiPanel();
 }
 
 async function main() {
@@ -455,7 +1032,9 @@ async function main() {
   });
 
   bindEvents();
+
   try {
+    await hydratePersistentState();
     await initializeRuntime();
     await newMatch();
   } catch (error) {

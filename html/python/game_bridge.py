@@ -4,7 +4,7 @@ import json
 from random import Random
 from typing import Any
 
-from euchre_game import EuchreGame, Phase
+from euchre_game import EuchreGame, IllegalMoveError, Phase
 from euchre_game.constants import PARTNER_BY_SEAT, SEATS, TEAM_BY_SEAT
 
 SUIT_SYMBOLS = {"C": "♣", "D": "♦", "H": "♥", "S": "♠"}
@@ -28,6 +28,10 @@ def _card_text(card: str | None) -> str:
     rank = card[0]
     suit = card[1]
     return f"{rank}{SUIT_SYMBOLS.get(suit, suit)}"
+
+
+def _card_token(card: str) -> str:
+    return card.upper().strip()
 
 
 class GameBridge:
@@ -72,6 +76,43 @@ class GameBridge:
         event = game.apply_move(move)
         self.last_event = event
         self._log(self._describe_event(event))
+        return self.snapshot()
+
+    def apply_move_token(self, move_token: str, reason: str | None = None) -> dict[str, Any]:
+        game = self._require_game()
+        if game.phase == Phase.HAND_COMPLETE:
+            raise IllegalMoveError("Cannot apply a move token while the hand is complete.")
+
+        normalized_token = self._normalize_move_token(move_token)
+        legal_moves = game.get_legal_moves()
+        move_lookup = {
+            self._move_token(move): move
+            for move in legal_moves
+        }
+        move = move_lookup.get(normalized_token)
+        if move is None:
+            legal_tokens = ", ".join(move_lookup.keys())
+            raise IllegalMoveError(
+                f"Move token {move_token!r} is not legal. Legal tokens: {legal_tokens}"
+            )
+
+        event = game.apply_move(move)
+        self.last_event = event
+        reason_suffix = ""
+        if reason:
+            compact_reason = " ".join(reason.strip().split())
+            if compact_reason:
+                reason_suffix = f" Reason: {compact_reason[:180]}"
+        self._log(f"AI selected {normalized_token}.{reason_suffix}")
+        self._log(self._describe_event(event))
+        return self.snapshot()
+
+    def get_ai_context(self) -> dict[str, Any]:
+        return self._build_ai_context()
+
+    def record_note(self, message: str) -> dict[str, Any]:
+        if message.strip():
+            self._log(message.strip())
         return self.snapshot()
 
     def set_view(self, view_mode: str = "god", viewer_seat: int = 0) -> dict[str, Any]:
@@ -144,11 +185,72 @@ class GameBridge:
                 for play in visible_state["current_trick"]
             ],
             "legal_moves": legal_moves,
+            "ai_context": self._build_ai_context() if game.current_player is not None else None,
             "visible_state": visible_state,
             "last_event": self.last_event,
             "last_message": self.logs[-1] if self.logs else "Ready.",
             "logs": self.logs[-80:],
         }
+
+    def _build_ai_context(self) -> dict[str, Any] | None:
+        game = self._require_game()
+        acting_player = game.current_player
+        if acting_player is None:
+            return None
+
+        viewer_state = game.get_masked_state(acting_player)
+        legal_moves = game.get_legal_moves()
+        legal_tokens = [self._move_token(move) for move in legal_moves]
+        hand = list(viewer_state["hands"][str(acting_player)])
+        lead_card = "-"
+        if viewer_state["current_trick"]:
+            lead_card = str(viewer_state["current_trick"][0]["card"])
+
+        compact_state = " | ".join(
+            [
+                f"Ph:{game.phase.value}",
+                f"T:{game.trump or '-'}",
+                f"P:{acting_player}",
+                f"D:{game.dealer}",
+                f"U:{game.upcard or '-'}",
+                f"L:{lead_card}",
+                f"Sc:[{game.scores[0]}-{game.scores[1]}]",
+                f"Tr:[{game.tricks_won[0]}-{game.tricks_won[1]}]",
+                f"H:[{','.join(hand)}]",
+                f"Leg:[{','.join(legal_tokens)}]",
+            ]
+        )
+
+        return {
+            "phase": game.phase.value,
+            "acting_player": acting_player,
+            "dealer": game.dealer,
+            "trump": game.trump,
+            "upcard": game.upcard,
+            "lead_card": lead_card,
+            "hand": hand,
+            "legal_move_tokens": legal_tokens,
+            "compact_state": compact_state,
+            "visible_state": viewer_state,
+        }
+
+    def _move_token(self, move: dict[str, Any]) -> str:
+        move_type = str(move["type"])
+        if move_type == "pass":
+            return "PASS"
+        if move_type == "order_up":
+            return "ORDER_UP"
+        if move_type == "call_trump":
+            return f"CALL_{str(move['suit']).upper()}"
+        if move_type in {"discard", "play_card"}:
+            return _card_token(str(move["card"]))
+        return move_type.upper()
+
+    def _normalize_move_token(self, token: str) -> str:
+        normalized = token.strip().upper().replace(" ", "_")
+        if normalized.startswith("CALL:"):
+            normalized = normalized.replace(":", "_", 1)
+        return normalized
 
     def _require_game(self) -> EuchreGame:
         if self.game is None:
@@ -243,6 +345,19 @@ def call_from_js(command: str, payload_json: str = "{}") -> str:
                 viewer_seat=int(payload.get("viewer_seat", 0)),
             )
             data = BRIDGE.step_random()
+        elif command == "apply_move_token":
+            BRIDGE.set_view(
+                view_mode=str(payload.get("view_mode", "god")),
+                viewer_seat=int(payload.get("viewer_seat", 0)),
+            )
+            data = BRIDGE.apply_move_token(
+                move_token=str(payload.get("move_token", "")),
+                reason=_maybe_str(payload.get("reason")),
+            )
+        elif command == "get_ai_context":
+            data = BRIDGE.get_ai_context()
+        elif command == "record_note":
+            data = BRIDGE.record_note(str(payload.get("message", "")))
         elif command == "set_view":
             data = BRIDGE.set_view(
                 view_mode=str(payload.get("view_mode", "god")),
@@ -265,3 +380,9 @@ def _maybe_int(value: Any) -> int | None:
     if value in (None, ""):
         return None
     return int(value)
+
+
+def _maybe_str(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    return str(value)

@@ -5,6 +5,7 @@
 Design and roadmap notes now live in:
 
 - [docs/ARCHITECTURE.md](/Users/jarad/git/EuchreGame/docs/ARCHITECTURE.md)
+- [docs/LOCAL_MODEL_SETUP.md](/Users/jarad/git/EuchreGame/docs/LOCAL_MODEL_SETUP.md)
 - [docs/ROADMAP.md](/Users/jarad/git/EuchreGame/docs/ROADMAP.md)
 
 ## Current Scope
@@ -22,6 +23,8 @@ The initial implementation includes:
 - pytest coverage for core behaviors
 - a smoke-test script that plays through a hand end to end
 - a browser-based HTML sandbox that runs the Python engine through Pyodide
+- optional AI-driven browser play using a locally hosted WebLLM model path
+- IndexedDB-backed persistence for browser settings, baseline metrics, and session metadata
 
 ## Rule Assumptions
 
@@ -112,6 +115,18 @@ The HTML UI uses a vendored local copy of Pyodide under `html/vendor/pyodide/`, 
 
 The UI architecture is documented in [docs/ARCHITECTURE.md](/Users/jarad/git/EuchreGame/docs/ARCHITECTURE.md).
 
+### Local AI Mode
+
+The browser UI now includes an optional Gemma/WebLLM path that:
+
+- loads WebLLM from a vendored local runtime under `html/vendor/web-llm/`
+- expects model assets under ignored local folders in `html/vendor/models/` and `html/vendor/model-libs/`
+- uses IndexedDB-backed persistence for browser settings, AI baseline metrics, and session metadata
+- can also configure WebLLM to cache model artifacts in IndexedDB between page loads
+
+Large model binaries are intentionally kept out of git. Setup details are in
+[docs/LOCAL_MODEL_SETUP.md](/Users/jarad/git/EuchreGame/docs/LOCAL_MODEL_SETUP.md).
+
 ## Minimal Example
 
 ```python
@@ -138,6 +153,12 @@ If that script succeeds and `pytest` passes, the scaffolded project is in a heal
 
 For browser verification, the Web UI should load to a ready state and start a new match without
 console errors when served from `python3 -m http.server`.
+
+For AI verification, the UI should:
+
+- stay fully usable in random mode when local model assets are absent
+- show a clear missing-asset error when `Load AI` is pressed without local Gemma artifacts
+- load and cache the configured model once the local paths are populated correctly
 
 ## Next Work
 

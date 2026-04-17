@@ -50,11 +50,80 @@
           </select>
         </label>
 
+        <label class="control-field">
+          <span>Play Mode</span>
+          <select id="mode-select">
+            <option value="random" selected>Random</option>
+            <option value="ai">Gemma AI</option>
+          </select>
+        </label>
+
+        <label class="control-field">
+          <span>Model Cache</span>
+          <select id="cache-select">
+            <option value="indexeddb" selected>IndexedDB</option>
+            <option value="cache">Cache API</option>
+          </select>
+        </label>
+
         <div class="button-row">
           <button id="new-match-button" class="button button-primary" disabled>New Match</button>
           <button id="next-move-button" class="button" disabled>Next Move</button>
           <button id="auto-play-button" class="button button-ghost" disabled>Auto Play</button>
+          <button id="load-ai-button" class="button" disabled>Load AI</button>
         </div>
+      </section>
+
+      <section class="control-strip ai-strip">
+        <label class="control-field control-wide">
+          <span>Model ID</span>
+          <input
+            id="model-id-input"
+            type="text"
+            spellcheck="false"
+            value="Gemma-4-2B-IT-INT4-Local"
+          />
+        </label>
+
+        <label class="control-field control-wide">
+          <span>Model Path</span>
+          <input
+            id="model-path-input"
+            type="text"
+            spellcheck="false"
+            value="./vendor/models/gemma-4-2b-it-int4/"
+          />
+        </label>
+
+        <label class="control-field control-wide">
+          <span>Model WASM</span>
+          <input
+            id="model-lib-input"
+            type="text"
+            spellcheck="false"
+            value="./vendor/model-libs/gemma-4-2b-it-int4-webgpu.wasm"
+          />
+        </label>
+
+        <label class="control-field">
+          <span>AI Temp</span>
+          <input id="ai-temperature-input" type="number" min="0" max="2" step="0.1" value="0.2" />
+        </label>
+
+        <label class="control-field">
+          <span>AI Max Tokens</span>
+          <input id="ai-max-tokens-input" type="number" min="32" max="256" step="1" value="96" />
+        </label>
+
+        <label class="control-field">
+          <span>AI Seed</span>
+          <input id="ai-seed-input" type="number" inputmode="numeric" placeholder="Optional" />
+        </label>
+
+        <label class="control-check">
+          <input id="ai-fallback-checkbox" type="checkbox" checked />
+          <span>Fallback to random on AI failure</span>
+        </label>
       </section>
 
       <main class="arena">
@@ -107,6 +176,58 @@
           <section class="legal-box">
             <p class="legal-label">Legal moves for the acting player</p>
             <div id="legal-moves" class="legal-pills"></div>
+          </section>
+
+          <section class="ai-box">
+            <div class="card-header compact">
+              <p class="eyebrow">AI Baseline</p>
+              <h2>Gemma Status</h2>
+            </div>
+
+            <div class="summary-grid ai-summary-grid">
+              <div class="summary-item">
+                <span class="summary-label">Mode</span>
+                <strong id="ai-mode-value">Random</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Model Cache</span>
+                <strong id="ai-cache-value">IndexedDB</strong>
+              </div>
+            </div>
+
+            <div class="ai-status-block">
+              <p id="ai-status-line" class="ai-line">AI idle. Random play remains available.</p>
+              <p id="cache-status-line" class="ai-line">Cache status unknown.</p>
+              <p id="storage-status-line" class="ai-line">Persistent storage not requested yet.</p>
+            </div>
+
+            <div class="summary-grid ai-summary-grid metrics-grid">
+              <div class="summary-item">
+                <span class="summary-label">AI Turns</span>
+                <strong id="metric-total-turns">0</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Valid JSON</span>
+                <strong id="metric-valid-json">0%</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Legal Moves</span>
+                <strong id="metric-legal-moves">0%</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Fallbacks</span>
+                <strong id="metric-fallbacks">0</strong>
+              </div>
+            </div>
+
+            <div class="button-row ai-button-row">
+              <button id="clear-ai-cache-button" class="button button-sand" disabled>
+                Clear Model Cache
+              </button>
+              <button id="reset-metrics-button" class="button button-sand" disabled>
+                Reset Metrics
+              </button>
+            </div>
           </section>
         </aside>
 
