@@ -1,0 +1,59 @@
+{
+  "run_id": "trajectory-20260417-123205",
+  "started_at": "2026-04-17T12:32:05.135627+00:00",
+  "ended_at": "2026-04-17T12:34:08.366960+00:00",
+  "config": {
+    "games": 1,
+    "seed": 101,
+    "winning_score": 10,
+    "timeout": 180.0,
+    "retries": 2,
+    "prompt_version": "v2-grounded-short",
+    "backends": [
+      {
+        "backend_id": "win-ollama",
+        "name": "win-ollama",
+        "api_style": "ollama",
+        "host": "http://127.0.0.1:11434",
+        "model": "gemma4:latest",
+        "weight": 1.0
+      }
+    ]
+  },
+  "paths": {
+    "trajectory": "factory/output/runs/smoke-win-ollama/trajectory.jsonl",
+    "raw_responses": "factory/output/runs/smoke-win-ollama/raw_responses.jsonl",
+    "validated_rows": "factory/output/runs/smoke-win-ollama/validated_rows.jsonl",
+    "gold_dataset": "factory/output/runs/smoke-win-ollama/gold_dataset.jsonl",
+    "rejected_rows": "factory/output/runs/smoke-win-ollama/rejected_rows.jsonl"
+  },
+  "summary": {
+    "attempted_responses": 15,
+    "accepted_gold_rows": 15,
+    "parse_failure_rate": 0.0,
+    "illegal_or_rejected_rate": 0.0,
+    "responses_per_minute": 7.3,
+    "wall_time_seconds": 123.22,
+    "latency_ms": {
+      "avg": 8214.29,
+      "p95": 8699.34,
+      "max": 14387.19
+    },
+    "trajectory_stats": {
+      "candidate_turns": 23,
+      "decision_turns": 15,
+      "skipped_forced_turns": 8
+    },
+    "backends": {
+      "win-ollama": {
+        "name": "win-ollama",
+        "model": "gemma4:latest",
+        "api_style": "ollama",
+        "games": 1,
+        "attempted_turns": 15,
+        "accepted_turns": 15,
+        "avg_latency_ms": 8214.29
+      }
+    }
+  }
+}

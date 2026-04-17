@@ -1,4 +1,10 @@
 const state = {
+  runs: [],
+  selectedRunId: null,
+  selectedRunDetail: null,
+  selectedGameId: null,
+  selectedGameDetail: null,
+  selectedFailureId: null,
   jobs: [],
   selectedJobId: null,
   files: [],
@@ -18,13 +24,31 @@ const elements = {
   runOneButton: document.querySelector("#run-one-button"),
   runTenButton: document.querySelector("#run-ten-button"),
   startJobButton: document.querySelector("#start-job-button"),
+  refreshRunsButton: document.querySelector("#refresh-runs-button"),
+  runList: document.querySelector("#run-list"),
+  runTitle: document.querySelector("#run-title"),
+  runStatusPill: document.querySelector("#run-status-pill"),
+  metricAccepted: document.querySelector("#metric-accepted"),
+  metricRpm: document.querySelector("#metric-rpm"),
+  metricLatency: document.querySelector("#metric-latency"),
+  metricParseRate: document.querySelector("#metric-parse-rate"),
+  metricGames: document.querySelector("#metric-games"),
+  metricFailures: document.querySelector("#metric-failures"),
+  backendList: document.querySelector("#backend-list"),
+  failureCounts: document.querySelector("#failure-counts"),
+  failureList: document.querySelector("#failure-list"),
+  gameList: document.querySelector("#game-list"),
+  turnListTitle: document.querySelector("#turn-list-title"),
+  turnList: document.querySelector("#turn-list"),
+  inspectorTitle: document.querySelector("#inspector-title"),
+  inspectorOutput: document.querySelector("#inspector-output"),
   refreshJobsButton: document.querySelector("#refresh-jobs-button"),
-  refreshFilesButton: document.querySelector("#refresh-files-button"),
   jobList: document.querySelector("#job-list"),
   jobLogTitle: document.querySelector("#job-log-title"),
   jobLogMeta: document.querySelector("#job-log-meta"),
   jobLogOutput: document.querySelector("#job-log-output"),
-  fileSummaryGrid: document.querySelector("#file-summary-grid"),
+  refreshFilesButton: document.querySelector("#refresh-files-button"),
+  artifactList: document.querySelector("#artifact-list"),
   fileSelect: document.querySelector("#file-select"),
   pageSizeSelect: document.querySelector("#page-size-select"),
   prevPageButton: document.querySelector("#prev-page-button"),
@@ -55,6 +79,20 @@ async function apiFetch(path, options = {}) {
   return response.json();
 }
 
+function formatTimestamp(value) {
+  if (!value) {
+    return "-";
+  }
+  return new Date(value).toLocaleString();
+}
+
+function formatNumber(value, digits = 2) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "-";
+  }
+  return Number(value).toFixed(digits);
+}
+
 function readJobPayload() {
   return {
     max_scenarios: Number.parseInt(elements.sampleCountInput.value, 10) || 10,
@@ -64,11 +102,217 @@ function readJobPayload() {
   };
 }
 
-function formatTimestamp(value) {
-  if (!value) {
-    return "-";
+function reviewLabel(review) {
+  if (!review) {
+    return "Unreviewed";
   }
-  return new Date(value).toLocaleString();
+  return review.decision.charAt(0).toUpperCase() + review.decision.slice(1);
+}
+
+function pickFailureTone(failure) {
+  if (failure?.transport_error) {
+    return "reject";
+  }
+  if (String(failure?.failure_bucket || "").startsWith("invalid_json")) {
+    return "flag";
+  }
+  return "none";
+}
+
+function renderRuns() {
+  if (!state.runs.length) {
+    elements.runList.innerHTML = `<p class="empty-state">No tracked runs yet.</p>`;
+    return;
+  }
+
+  elements.runList.innerHTML = state.runs
+    .map((run) => {
+      const activeClass = run.run_id === state.selectedRunId ? "is-active" : "";
+      return `
+        <button class="run-card ${activeClass}" data-run-id="${run.run_id}">
+          <div class="job-card-top">
+            <strong>${run.run_id}</strong>
+            <span class="job-status job-status-${run.status}">${run.status}</span>
+          </div>
+          <span class="job-subline">${run.mode} • ${run.game_count ?? 0} games</span>
+          <span class="job-subline">${run.accepted_gold_rows ?? 0}/${run.attempted_responses ?? 0} accepted</span>
+          <span class="job-subline">${formatTimestamp(run.started_at || run.created_at)}</span>
+        </button>
+      `;
+    })
+    .join("");
+
+  elements.runList.querySelectorAll("[data-run-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.selectedRunId = button.dataset.runId;
+      state.selectedGameId = null;
+      state.selectedGameDetail = null;
+      state.selectedFailureId = null;
+      renderRuns();
+      void loadRunDetail();
+    });
+  });
+}
+
+function renderRunSummary() {
+  const detail = state.selectedRunDetail;
+  if (!detail) {
+    elements.runTitle.textContent = "Select a run";
+    elements.runStatusPill.textContent = "Idle";
+    elements.runStatusPill.className = "status-pill review-none";
+    elements.metricAccepted.textContent = "-";
+    elements.metricRpm.textContent = "-";
+    elements.metricLatency.textContent = "-";
+    elements.metricParseRate.textContent = "-";
+    elements.metricGames.textContent = "-";
+    elements.metricFailures.textContent = "-";
+    elements.backendList.innerHTML = `<p class="empty-state">Choose a run to see backend stats.</p>`;
+    elements.failureCounts.innerHTML = "";
+    elements.failureList.innerHTML = `<p class="empty-state">No failure data loaded.</p>`;
+    elements.gameList.innerHTML = `<p class="empty-state">No games loaded.</p>`;
+    elements.turnListTitle.textContent = "Game Detail";
+    elements.turnList.innerHTML = `<p class="empty-state">Choose a game to inspect turns.</p>`;
+    return;
+  }
+
+  const run = detail.run;
+  const metrics = detail.metrics || {};
+  const failures = detail.failures || { items: [], counts: {}, total: 0 };
+  elements.runTitle.textContent = run.run_id;
+  elements.runStatusPill.textContent = run.status;
+  elements.runStatusPill.className = `status-pill job-status-${run.status}`;
+  elements.metricAccepted.textContent = `${metrics.accepted_gold_rows ?? 0} / ${metrics.attempted_responses ?? 0}`;
+  elements.metricRpm.textContent = formatNumber(metrics.responses_per_minute);
+  elements.metricLatency.textContent =
+    metrics.avg_latency_ms === null || metrics.avg_latency_ms === undefined
+      ? "-"
+      : `${formatNumber(metrics.avg_latency_ms)} ms`;
+  elements.metricParseRate.textContent =
+    metrics.parse_failure_rate === null || metrics.parse_failure_rate === undefined
+      ? "-"
+      : `${formatNumber(metrics.parse_failure_rate)}%`;
+  elements.metricGames.textContent = `${detail.games.length}`;
+  elements.metricFailures.textContent = `${failures.total ?? 0}`;
+
+  elements.backendList.innerHTML = detail.backends.length
+    ? detail.backends
+        .map(
+          (backend) => `
+            <article class="summary-card static-card">
+              <span class="summary-title">${backend.name}</span>
+              <strong>${backend.accepted_turns}/${backend.attempted_turns} accepted</strong>
+              <span class="summary-meta">${backend.model}</span>
+              <span class="summary-meta">${backend.api_style} • ${formatNumber(backend.avg_latency_ms)} ms avg</span>
+            </article>
+          `,
+        )
+        .join("")
+    : `<p class="empty-state">No backend rows recorded for this run.</p>`;
+
+  const failureCountEntries = Object.entries(failures.counts || {});
+  elements.failureCounts.innerHTML = failureCountEntries.length
+    ? failureCountEntries
+        .map(
+          ([key, value]) =>
+            `<span class="failure-chip">${key.replaceAll("_", " ")}: <strong>${value}</strong></span>`,
+        )
+        .join("")
+    : `<span class="muted-text">No exceptions or rejected turns recorded.</span>`;
+
+  elements.failureList.innerHTML = failures.items?.length
+    ? failures.items
+        .map((failure) => {
+          const activeClass = failure.failure_id === state.selectedFailureId ? "is-active" : "";
+          return `
+            <button class="row-card ${activeClass}" data-failure-id="${failure.failure_id}">
+              <div class="row-card-top">
+                <strong>${failure.backend_name || failure.backend_id || "backend"}</strong>
+                <span class="review-pill review-${pickFailureTone(failure)}">${failure.phase || "-"}</span>
+              </div>
+              <span class="row-preview">${failure.failure_bucket || failure.transport_error || "Unknown failure"}</span>
+              <span class="summary-meta">${failure.game_id || "-"} • turn ${failure.turn_id ?? "-"}</span>
+            </button>
+          `;
+        })
+        .join("")
+    : `<p class="empty-state">No exceptions or rejected responses in this run.</p>`;
+
+  elements.failureList.querySelectorAll("[data-failure-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const failure = failures.items.find((item) => item.failure_id === button.dataset.failureId);
+      state.selectedFailureId = button.dataset.failureId;
+      renderRunSummary();
+      setInspector("Failure Detail", failure?.detail || failure || {});
+    });
+  });
+
+  elements.gameList.innerHTML = detail.games.length
+    ? detail.games
+        .map((game) => {
+          const activeClass = game.game_id === state.selectedGameId ? "is-active" : "";
+          return `
+            <button class="row-card ${activeClass}" data-game-id="${game.game_id}">
+              <div class="row-card-top">
+                <strong>${game.game_id}</strong>
+                <span class="review-pill review-none">${game.backend_id}</span>
+              </div>
+              <span class="summary-meta">${game.accepted_turns}/${game.decision_turns} accepted</span>
+              <span class="summary-meta">${game.skipped_forced_turns} forced skipped</span>
+            </button>
+          `;
+        })
+        .join("")
+    : `<p class="empty-state">No games recorded for this run.</p>`;
+
+  elements.gameList.querySelectorAll("[data-game-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.selectedGameId = button.dataset.gameId;
+      state.selectedFailureId = null;
+      renderRunSummary();
+      void loadGameDetail();
+    });
+  });
+}
+
+function setInspector(title, payload) {
+  elements.inspectorTitle.textContent = title;
+  elements.inspectorOutput.textContent = JSON.stringify(payload, null, 2);
+}
+
+function renderGameDetail() {
+  const detail = state.selectedGameDetail;
+  if (!detail) {
+    elements.turnListTitle.textContent = "Game Detail";
+    elements.turnList.innerHTML = `<p class="empty-state">Choose a game to inspect turns.</p>`;
+    return;
+  }
+
+  elements.turnListTitle.textContent = detail.game.game_id;
+  elements.turnList.innerHTML = detail.turns.length
+    ? detail.turns
+        .map(
+          (turn) => `
+            <button class="row-card" data-turn-index="${turn.turn_index}">
+              <div class="row-card-top">
+                <strong>Turn ${turn.turn_index}</strong>
+                <span class="review-pill review-${turn.accepted ? "approve" : "reject"}">${turn.phase || "-"}</span>
+              </div>
+              <span class="summary-meta">${turn.output_move || "no move"} • ${turn.legal_move_count} legal</span>
+              <span class="row-preview">${turn.reasoning_preview || turn.failure_bucket || turn.compact_state || ""}</span>
+            </button>
+          `,
+        )
+        .join("")
+    : `<p class="empty-state">No decision turns were saved for this game.</p>`;
+
+  elements.turnList.querySelectorAll("[data-turn-index]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const turn = detail.turns.find(
+        (item) => String(item.turn_index) === String(button.dataset.turnIndex),
+      );
+      setInspector("Turn Detail", turn?.detail || turn || {});
+    });
+  });
 }
 
 function renderJobs() {
@@ -88,7 +332,6 @@ function renderJobs() {
           </div>
           <span class="job-subline">${job.config?.model ?? "-"}</span>
           <span class="job-subline">${job.counts?.gold_rows ?? 0} gold / ${job.counts?.rejected_rows ?? 0} rejected</span>
-          <span class="job-subline">${formatTimestamp(job.started_at)}</span>
         </button>
       `;
     })
@@ -130,14 +373,49 @@ async function loadJobDetail() {
   renderJobDetail(job);
 }
 
-function renderFileSummaries() {
+async function loadRuns() {
+  const data = await apiFetch("/api/runs");
+  state.runs = data.runs || [];
+  if (!state.selectedRunId && state.runs.length) {
+    state.selectedRunId = state.runs[0].run_id;
+  }
+  renderRuns();
+  await loadRunDetail();
+}
+
+async function loadRunDetail() {
+  if (!state.selectedRunId) {
+    state.selectedRunDetail = null;
+    renderRunSummary();
+    return;
+  }
+  state.selectedRunDetail = await apiFetch(`/api/runs/${state.selectedRunId}`);
+  renderRunSummary();
+  if (!state.selectedGameId && state.selectedRunDetail.games.length) {
+    state.selectedGameId = state.selectedRunDetail.games[0].game_id;
+  }
+  await loadGameDetail();
+  setInspector("Run Detail", state.selectedRunDetail);
+}
+
+async function loadGameDetail() {
+  if (!state.selectedGameId) {
+    state.selectedGameDetail = null;
+    renderGameDetail();
+    return;
+  }
+  state.selectedGameDetail = await apiFetch(`/api/games/${state.selectedGameId}`);
+  renderGameDetail();
+}
+
+function renderArtifacts() {
   if (!state.files.length) {
-    elements.fileSummaryGrid.innerHTML = `<p class="empty-state">No JSONL files found yet.</p>`;
+    elements.artifactList.innerHTML = `<p class="empty-state">No JSONL files found yet.</p>`;
     elements.fileSelect.innerHTML = "";
     return;
   }
 
-  elements.fileSummaryGrid.innerHTML = state.files
+  elements.artifactList.innerHTML = state.files
     .map(
       (file) => `
         <button class="summary-card ${file.file_id === state.selectedFileId ? "is-active" : ""}" data-file-id="${file.file_id}">
@@ -157,12 +435,12 @@ function renderFileSummaries() {
     )
     .join("");
 
-  elements.fileSummaryGrid.querySelectorAll("[data-file-id]").forEach((button) => {
+  elements.artifactList.querySelectorAll("[data-file-id]").forEach((button) => {
     button.addEventListener("click", () => {
       state.selectedFileId = button.dataset.fileId;
       state.currentOffset = 0;
       state.selectedRow = null;
-      renderFileSummaries();
+      renderArtifacts();
       void loadRows();
     });
   });
@@ -174,24 +452,17 @@ async function loadFiles() {
   if (!state.selectedFileId && state.files.length) {
     state.selectedFileId = state.files[0].file_id;
   }
-  renderFileSummaries();
+  renderArtifacts();
   await loadRows();
-}
-
-function reviewLabel(review) {
-  if (!review) {
-    return "Unreviewed";
-  }
-  return review.decision.charAt(0).toUpperCase() + review.decision.slice(1);
 }
 
 function renderRowDetail() {
   if (!state.selectedRow) {
-    elements.detailTitle.textContent = "Row Detail";
+    elements.detailTitle.textContent = "Artifact Row";
     elements.detailReviewStatus.textContent = "Unreviewed";
-    elements.detailReviewStatus.className = "review-pill";
+    elements.detailReviewStatus.className = "review-pill review-none";
     elements.reviewNotes.value = "";
-    elements.rowDetail.textContent = "Select a row to inspect the saved JSON.";
+    elements.rowDetail.textContent = "Select an artifact row to inspect the saved JSON.";
     return;
   }
 
@@ -223,7 +494,9 @@ function renderRows(items, totalRows) {
     )
     .join("");
 
-  const lookup = new Map(items.map((item) => [item.source_ref, { ...item, file_id: state.selectedFileId }]));
+  const lookup = new Map(
+    items.map((item) => [item.source_ref, { ...item, file_id: state.selectedFileId }]),
+  );
   elements.rowList.querySelectorAll("[data-source-ref]").forEach((button) => {
     button.addEventListener("click", () => {
       state.selectedRow = lookup.get(button.dataset.sourceRef);
@@ -284,13 +557,14 @@ async function startJob(overrides = {}) {
 }
 
 function bindEvents() {
+  elements.refreshRunsButton.addEventListener("click", () => void loadRuns());
   elements.refreshJobsButton.addEventListener("click", () => void loadJobs());
   elements.refreshFilesButton.addEventListener("click", () => void loadFiles());
   elements.fileSelect.addEventListener("change", () => {
     state.selectedFileId = elements.fileSelect.value;
     state.currentOffset = 0;
     state.selectedRow = null;
-    renderFileSummaries();
+    renderArtifacts();
     void loadRows();
   });
   elements.pageSizeSelect.addEventListener("change", () => {
@@ -320,9 +594,8 @@ async function main() {
   bindEvents();
   try {
     await apiFetch("/api/health");
-    setStatus("Backend connected. Loading jobs and saved files.", "ready");
-    await loadJobs();
-    await loadFiles();
+    setStatus("Backend connected. Loading runs, jobs, and artifacts.", "ready");
+    await Promise.all([loadRuns(), loadJobs(), loadFiles()]);
   } catch (error) {
     console.error(error);
     setStatus(String(error), "error");

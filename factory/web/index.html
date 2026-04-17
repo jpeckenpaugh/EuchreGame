@@ -3,23 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Data Factory Dashboard</title>
+    <title>Data Factory Control Room</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <div class="page-shell">
       <header class="hero">
         <div>
-          <p class="eyebrow">Local Control Room</p>
-          <h1>Data Factory Dashboard</h1>
+          <p class="eyebrow">Run Monitor</p>
+          <h1>Euchre Training Factory</h1>
           <p class="hero-copy">
-            Start small generation jobs, inspect saved JSONL outputs, and record manual validation
-            decisions without leaving the browser.
+            Watch trajectory runs, inspect backend behavior, review saved JSONL artifacts, and
+            surface failures from the local SQLite index.
           </p>
         </div>
         <div class="hero-status">
           <span id="status-pill" class="status-pill status-loading">Connecting</span>
-          <p id="status-text" class="status-text">Probing the local FastAPI backend.</p>
+          <p id="status-text" class="status-text">Checking the FastAPI dashboard backend.</p>
         </div>
       </header>
 
@@ -48,69 +48,178 @@
       </section>
 
       <main class="dashboard-grid">
-        <section class="panel panel-jobs">
+        <section class="panel sidebar-panel">
           <div class="panel-header">
             <div>
-              <p class="eyebrow">Jobs</p>
+              <p class="eyebrow">Runs</p>
               <h2>Recent Runs</h2>
             </div>
-            <button id="refresh-jobs-button" class="button button-ghost">Refresh</button>
+            <button id="refresh-runs-button" class="button button-ghost">Refresh</button>
           </div>
-          <div id="job-list" class="card-list"></div>
-          <div class="log-panel">
+          <div id="run-list" class="card-list"></div>
+
+          <div class="log-panel compact-panel">
+            <div class="panel-header compact-header">
+              <div>
+                <p class="eyebrow">Jobs</p>
+                <h3>Pipeline Jobs</h3>
+              </div>
+              <button id="refresh-jobs-button" class="button button-ghost">Refresh</button>
+            </div>
+            <div id="job-list" class="card-list compact-list"></div>
             <div class="log-head">
-              <h3 id="job-log-title">Job Log</h3>
+              <strong id="job-log-title">Job Log</strong>
               <span id="job-log-meta" class="muted-text">Select a job.</span>
             </div>
             <pre id="job-log-output" class="log-output">No job selected.</pre>
           </div>
         </section>
 
-        <section class="panel panel-files">
+        <section class="panel detail-panel-wide">
           <div class="panel-header">
             <div>
-              <p class="eyebrow">Artifacts</p>
-              <h2>Saved JSONL Files</h2>
+              <p class="eyebrow">Overview</p>
+              <h2 id="run-title">Select a run</h2>
             </div>
-            <button id="refresh-files-button" class="button button-ghost">Refresh</button>
-          </div>
-          <div id="file-summary-grid" class="summary-grid"></div>
-
-          <div class="browser-strip">
-            <label class="control-field control-wide">
-              <span>Browse File</span>
-              <select id="file-select"></select>
-            </label>
-            <label class="control-field">
-              <span>Page Size</span>
-              <select id="page-size-select">
-                <option value="10">10</option>
-                <option value="20" selected>20</option>
-                <option value="50">50</option>
-              </select>
-            </label>
-            <div class="button-row">
-              <button id="prev-page-button" class="button">Previous</button>
-              <button id="next-page-button" class="button">Next</button>
-            </div>
+            <span id="run-status-pill" class="status-pill review-none">Idle</span>
           </div>
 
-          <div class="rows-layout">
-            <div id="row-list" class="row-list"></div>
-            <div class="detail-panel">
-              <div class="detail-meta">
-                <h3 id="detail-title">Row Detail</h3>
-                <span id="detail-review-status" class="review-pill">Unreviewed</span>
-              </div>
-              <textarea id="review-notes" class="review-notes" placeholder="Notes for manual validation"></textarea>
-              <div class="button-row review-buttons">
-                <button id="approve-button" class="button button-primary">Approve</button>
-                <button id="flag-button" class="button button-sand">Flag</button>
-                <button id="reject-button" class="button">Reject</button>
-              </div>
-              <pre id="row-detail" class="detail-output">Select a row to inspect the saved JSON.</pre>
-            </div>
+          <div id="overview-grid" class="stats-grid">
+            <article class="stat-card">
+              <span class="stat-label">Accepted</span>
+              <strong id="metric-accepted">-</strong>
+            </article>
+            <article class="stat-card">
+              <span class="stat-label">Responses / Min</span>
+              <strong id="metric-rpm">-</strong>
+            </article>
+            <article class="stat-card">
+              <span class="stat-label">Avg Latency</span>
+              <strong id="metric-latency">-</strong>
+            </article>
+            <article class="stat-card">
+              <span class="stat-label">Parse Failure Rate</span>
+              <strong id="metric-parse-rate">-</strong>
+            </article>
+            <article class="stat-card">
+              <span class="stat-label">Games</span>
+              <strong id="metric-games">-</strong>
+            </article>
+            <article class="stat-card danger-card">
+              <span class="stat-label">Exceptions / Rejections</span>
+              <strong id="metric-failures">-</strong>
+            </article>
           </div>
+
+          <div class="detail-grid">
+            <section class="subpanel">
+              <div class="subpanel-header">
+                <div>
+                  <p class="eyebrow">Backends</p>
+                  <h3>Run Backends</h3>
+                </div>
+              </div>
+              <div id="backend-list" class="summary-grid"></div>
+            </section>
+
+            <section class="subpanel">
+              <div class="subpanel-header">
+                <div>
+                  <p class="eyebrow">Failures</p>
+                  <h3>Exceptions and Rejections</h3>
+                </div>
+              </div>
+              <div id="failure-counts" class="failure-counts"></div>
+              <div id="failure-list" class="card-list compact-list"></div>
+            </section>
+          </div>
+
+          <div class="detail-grid">
+            <section class="subpanel">
+              <div class="subpanel-header">
+                <div>
+                  <p class="eyebrow">Games</p>
+                  <h3>Game Trajectories</h3>
+                </div>
+              </div>
+              <div id="game-list" class="card-list compact-list"></div>
+            </section>
+
+            <section class="subpanel">
+              <div class="subpanel-header">
+                <div>
+                  <p class="eyebrow">Turns</p>
+                  <h3 id="turn-list-title">Game Detail</h3>
+                </div>
+              </div>
+              <div id="turn-list" class="card-list compact-list"></div>
+            </section>
+          </div>
+
+          <section class="subpanel detail-output-panel">
+            <div class="subpanel-header">
+              <div>
+                <p class="eyebrow">Inspector</p>
+                <h3 id="inspector-title">Run Inspector</h3>
+              </div>
+            </div>
+            <pre id="inspector-output" class="detail-output">
+Select a run, game, failure, or artifact row to inspect structured details.
+            </pre>
+          </section>
+
+          <section class="subpanel">
+            <div class="subpanel-header">
+              <div>
+                <p class="eyebrow">Artifacts</p>
+                <h3>Saved JSONL</h3>
+              </div>
+              <button id="refresh-files-button" class="button button-ghost">Refresh</button>
+            </div>
+            <div id="artifact-list" class="summary-grid"></div>
+
+            <div class="browser-strip">
+              <label class="control-field control-wide">
+                <span>Browse File</span>
+                <select id="file-select"></select>
+              </label>
+              <label class="control-field">
+                <span>Page Size</span>
+                <select id="page-size-select">
+                  <option value="10">10</option>
+                  <option value="20" selected>20</option>
+                  <option value="50">50</option>
+                </select>
+              </label>
+              <div class="button-row">
+                <button id="prev-page-button" class="button">Previous</button>
+                <button id="next-page-button" class="button">Next</button>
+              </div>
+            </div>
+
+            <div class="rows-layout">
+              <div id="row-list" class="row-list"></div>
+              <div class="detail-panel">
+                <div class="detail-meta">
+                  <h3 id="detail-title">Artifact Row</h3>
+                  <span id="detail-review-status" class="review-pill review-none">Unreviewed</span>
+                </div>
+                <textarea
+                  id="review-notes"
+                  class="review-notes"
+                  placeholder="Notes for manual validation"
+                ></textarea>
+                <div class="button-row review-buttons">
+                  <button id="approve-button" class="button button-primary">Approve</button>
+                  <button id="flag-button" class="button button-sand">Flag</button>
+                  <button id="reject-button" class="button">Reject</button>
+                </div>
+                <pre id="row-detail" class="detail-output">
+Select an artifact row to inspect the saved JSON.
+                </pre>
+              </div>
+            </div>
+          </section>
         </section>
       </main>
     </div>

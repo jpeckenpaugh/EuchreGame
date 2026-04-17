@@ -12,9 +12,31 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
+def _strip_markdown_json_fence(text: str) -> str:
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+
+    lines = stripped.splitlines()
+    if len(lines) < 3:
+        return stripped
+
+    first_line = lines[0].strip()
+    last_line = lines[-1].strip()
+    if last_line != "```":
+        return stripped
+
+    fence_label = first_line.removeprefix("```").strip().lower()
+    if fence_label not in {"", "json"}:
+        return stripped
+
+    return "\n".join(lines[1:-1]).strip()
+
+
 def parse_model_response(text: str) -> tuple[dict[str, Any] | None, str | None]:
+    normalized_text = _strip_markdown_json_fence(text)
     try:
-        parsed = json.loads(text)
+        parsed = json.loads(normalized_text)
     except json.JSONDecodeError as exc:
         return None, f"invalid_json:{exc}"
     if not isinstance(parsed, dict):
