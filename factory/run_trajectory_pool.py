@@ -5,6 +5,7 @@ import json
 import random
 import sys
 import time
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import UTC, datetime
 from pathlib import Path
 from statistics import mean
@@ -17,6 +18,11 @@ if str(PROJECT_ROOT) not in sys.path:
 
 def utc_now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def log_progress(message: str) -> None:
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    print(f"[{timestamp}] {message}", flush=True)
 
 
 def percentile(values: list[float], pct: float) -> float | None:
@@ -48,20 +54,6 @@ def parse_backend_spec(spec: str) -> dict[str, Any]:
     }
 
 
-def choose_backend(backends: list[dict[str, Any]], rng: random.Random) -> dict[str, Any]:
-    weights = [float(max(0.0, backend["weight"])) for backend in backends]
-    total = sum(weights)
-    if total <= 0:
-        return backends[0]
-    threshold = rng.random() * total
-    running = 0.0
-    for backend, weight in zip(backends, weights, strict=True):
-        running += weight
-        if threshold <= running:
-            return backend
-    return backends[-1]
-
-
 def build_scenario(
     *,
     game: Any,
@@ -89,6 +81,149 @@ def build_scenario(
         "legal_move_tokens": legal_move_tokens,
         "phase": str(masked_state["phase"]),
         "legal_move_count": len(legal_move_tokens),
+    }
+
+
+def play_game(
+    *,
+    backend: dict[str, Any],
+    game_id: str,
+    game_seed: int,
+    dealer: int,
+    winning_score: int,
+    timeout_s: float,
+    retries: int,
+) -> dict[str, Any]:
+    from euchre_game import EuchreGame, Phase
+    from factory.generate_trajectories import process_scenario
+    from factory.validation_utils import validate_with_status
+
+    game = EuchreGame.new_game(
+        seed=game_seed,
+        dealer=dealer,
+        winning_score=winning_score,
+    )
+    turn_index = 0
+    game_candidate_turns = 0
+    game_decision_turns = 0
+    game_skipped_forced = 0
+    game_accepted_turns = 0
+    trajectory_rows: list[dict[str, Any]] = []
+    raw_rows: list[dict[str, Any]] = []
+    validated_rows: list[dict[str, Any]] = []
+    gold_rows: list[dict[str, Any]] = []
+    rejected_rows: list[dict[str, Any]] = []
+    latencies: list[float] = []
+
+    while game.phase != Phase.HAND_COMPLETE:
+        legal_moves = [dict(move) for move in game.get_legal_moves()]
+        if not legal_moves:
+            raise RuntimeError(
+                f"No legal moves available for {game_id} in phase {game.phase!r}"
+            )
+
+        game_candidate_turns += 1
+
+        if len(legal_moves) == 1:
+            game_skipped_forced += 1
+            game.apply_move(legal_moves[0])
+            turn_index += 1
+            continue
+
+        scenario = build_scenario(
+            game=game,
+            game_id=game_id,
+            seed=game_seed,
+            turn_index=turn_index,
+        )
+        raw_row = process_scenario(
+            scenario=scenario,
+            model=backend["model"],
+            host=backend["host"],
+            timeout_s=timeout_s,
+            retries=retries,
+            api_style=backend["api_style"],
+        )
+        raw_row["backend_id"] = backend["backend_id"]
+        raw_row["backend_name"] = backend["name"]
+        raw_row["game_id"] = game_id
+        raw_rows.append(raw_row)
+
+        gold_row, rejected_row, validated = validate_with_status(raw_row)
+        validated["backend_id"] = backend["backend_id"]
+        validated["backend_name"] = backend["name"]
+        validated["game_id"] = game_id
+        validated_rows.append(validated)
+
+        latency_ms = validated.get("latency_ms")
+        if isinstance(latency_ms, (int, float)):
+            latencies.append(float(latency_ms))
+
+        if gold_row is not None:
+            gold_row["metadata"]["backend_id"] = backend["backend_id"]
+            gold_row["metadata"]["backend_name"] = backend["name"]
+            gold_row["metadata"]["api_style"] = backend["api_style"]
+            gold_row["metadata"]["game_id"] = game_id
+            gold_rows.append(gold_row)
+            game_accepted_turns += 1
+        if rejected_row is not None:
+            rejected_row["backend_id"] = backend["backend_id"]
+            rejected_row["backend_name"] = backend["name"]
+            rejected_row["game_id"] = game_id
+            rejected_rows.append(rejected_row)
+
+        trajectory_rows.append(
+            {
+                "game_id": game_id,
+                "turn_index": turn_index,
+                "seed": game_seed,
+                "backend_id": backend["backend_id"],
+                "backend_name": backend["name"],
+                "backend_model": backend["model"],
+                "api_style": backend["api_style"],
+                "scenario": scenario,
+                "raw_response": raw_row,
+                "validated": validated,
+            }
+        )
+
+        game_decision_turns += 1
+
+        if gold_row is not None:
+            move_token = str(gold_row["output"]).replace('{"move":"', "").replace('"}', "")
+            move_lookup = {
+                token: move
+                for token, move in zip(
+                    scenario["legal_move_tokens"],
+                    scenario["legal_moves"],
+                    strict=True,
+                )
+            }
+            chosen_move = move_lookup.get(move_token)
+            if chosen_move is None:
+                raise RuntimeError(
+                    f"Accepted move token {move_token!r} was not recoverable."
+                )
+            game.apply_move(chosen_move)
+        else:
+            game.apply_move(legal_moves[0])
+
+        turn_index += 1
+
+    return {
+        "backend_id": backend["backend_id"],
+        "game_id": game_id,
+        "seed": game_seed,
+        "candidate_turns": game_candidate_turns,
+        "decision_turns": game_decision_turns,
+        "skipped_forced_turns": game_skipped_forced,
+        "accepted_turns": game_accepted_turns,
+        "trajectory_rows": trajectory_rows,
+        "raw_rows": raw_rows,
+        "validated_rows": validated_rows,
+        "gold_rows": gold_rows,
+        "rejected_rows": rejected_rows,
+        "latencies": latencies,
     }
 
 
@@ -194,7 +329,6 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    from euchre_game import EuchreGame, Phase
     from factory.common import PROMPT_VERSION, ensure_output_dir, write_jsonl
     from factory.db import (
         create_game,
@@ -209,9 +343,6 @@ def main() -> None:
         upsert_backend,
         upsert_run_metrics,
     )
-    from factory.generate_trajectories import process_scenario
-    from factory.validation_utils import validate_with_status
-
     args = parse_args()
     backends = [parse_backend_spec(spec) for spec in args.backend]
     run_id = datetime.now(UTC).strftime("trajectory-%Y%m%d-%H%M%S")
@@ -268,147 +399,114 @@ def main() -> None:
             notes="single backend per game trajectory run",
         )
         start_run(connection, run_id=run_id, started_at=started_at)
+        connection.commit()
         for backend in backends:
             upsert_backend(connection, backend, seen_at=started_at)
             register_run_backend(connection, run_id=run_id, backend_id=backend["backend_id"])
+        connection.commit()
 
-        for game_number in range(args.games):
-            game_seed = rng.randrange(1, 10_000_000)
-            dealer = rng.randrange(4)
-            game_id = f"{run_id}-g{game_number + 1:03d}"
-            backend = choose_backend(backends, rng)
+        game_specs = [
+            {
+                "game_number": game_number,
+                "game_id": f"{run_id}-g{game_number + 1:03d}",
+                "seed": rng.randrange(1, 10_000_000),
+                "dealer": rng.randrange(4),
+            }
+            for game_number in range(args.games)
+        ]
+        pending_specs = list(game_specs)
+
+        def submit_game(
+            *,
+            executor: ThreadPoolExecutor,
+            backend: dict[str, Any],
+            spec: dict[str, Any],
+        ) -> Future[dict[str, Any]]:
             backend_stats[backend["backend_id"]]["games"] += 1
             create_game(
                 connection,
-                game_id=game_id,
+                game_id=str(spec["game_id"]),
                 run_id=run_id,
                 backend_id=backend["backend_id"],
-                seed=game_seed,
+                seed=int(spec["seed"]),
                 started_at=utc_now(),
             )
-
-            game = EuchreGame.new_game(
-                seed=game_seed,
-                dealer=dealer,
-                winning_score=args.winning_score,
+            connection.commit()
+            log_progress(
+                f"Started {spec['game_id']} on {backend['name']} "
+                f"(seed={spec['seed']}, dealer={spec['dealer']})."
             )
-            turn_index = 0
-            game_candidate_turns = 0
-            game_decision_turns = 0
-            game_skipped_forced = 0
-            game_accepted_turns = 0
+            return executor.submit(
+                play_game,
+                backend=backend,
+                game_id=str(spec["game_id"]),
+                game_seed=int(spec["seed"]),
+                dealer=int(spec["dealer"]),
+                winning_score=args.winning_score,
+                timeout_s=args.timeout,
+                retries=args.retries,
+            )
 
-            while game.phase != Phase.HAND_COMPLETE:
-                legal_moves = [dict(move) for move in game.get_legal_moves()]
-                if not legal_moves:
-                    raise RuntimeError(
-                        f"No legal moves available for {game_id} in phase {game.phase!r}"
+        future_to_backend: dict[Future[dict[str, Any]], dict[str, Any]] = {}
+        with ThreadPoolExecutor(max_workers=len(backends)) as executor:
+            for backend in backends:
+                if not pending_specs:
+                    break
+                spec = pending_specs.pop(0)
+                future = submit_game(executor=executor, backend=backend, spec=spec)
+                future_to_backend[future] = backend
+
+            while future_to_backend:
+                done, _ = wait(future_to_backend, return_when=FIRST_COMPLETED)
+                for future in done:
+                    backend = future_to_backend.pop(future)
+                    result = future.result()
+
+                    for row in result["trajectory_rows"]:
+                        row["run_id"] = run_id
+                    trajectory_rows.extend(result["trajectory_rows"])
+                    raw_rows.extend(result["raw_rows"])
+                    validated_rows.extend(result["validated_rows"])
+                    gold_rows.extend(result["gold_rows"])
+                    rejected_rows.extend(result["rejected_rows"])
+                    total_candidate_turns += int(result["candidate_turns"])
+                    total_decision_turns += int(result["decision_turns"])
+                    total_skipped_forced += int(result["skipped_forced_turns"])
+                    backend_stats[backend["backend_id"]]["attempted_turns"] += len(
+                        result["validated_rows"]
+                    )
+                    backend_stats[backend["backend_id"]]["accepted_turns"] += int(
+                        result["accepted_turns"]
+                    )
+                    backend_stats[backend["backend_id"]]["latencies"].extend(
+                        result["latencies"]
                     )
 
-                game_candidate_turns += 1
-                total_candidate_turns += 1
+                    finish_game(
+                        connection,
+                        game_id=str(result["game_id"]),
+                        ended_at=utc_now(),
+                        status="completed",
+                        candidate_turns=int(result["candidate_turns"]),
+                        decision_turns=int(result["decision_turns"]),
+                        skipped_forced_turns=int(result["skipped_forced_turns"]),
+                        accepted_turns=int(result["accepted_turns"]),
+                    )
+                    connection.commit()
+                    log_progress(
+                        f"Completed {result['game_id']} on {backend['name']}: "
+                        f"{result['accepted_turns']}/{result['decision_turns']} accepted, "
+                        f"{result['skipped_forced_turns']} forced skipped."
+                    )
 
-                if len(legal_moves) == 1:
-                    game_skipped_forced += 1
-                    total_skipped_forced += 1
-                    game.apply_move(legal_moves[0])
-                    turn_index += 1
-                    continue
-
-                scenario = build_scenario(
-                    game=game,
-                    game_id=game_id,
-                    seed=game_seed,
-                    turn_index=turn_index,
-                )
-                raw_row = process_scenario(
-                    scenario=scenario,
-                    model=backend["model"],
-                    host=backend["host"],
-                    timeout_s=args.timeout,
-                    retries=args.retries,
-                    api_style=backend["api_style"],
-                )
-                raw_row["backend_id"] = backend["backend_id"]
-                raw_row["backend_name"] = backend["name"]
-                raw_row["game_id"] = game_id
-                raw_rows.append(raw_row)
-
-                gold_row, rejected_row, validated = validate_with_status(raw_row)
-                validated["backend_id"] = backend["backend_id"]
-                validated["backend_name"] = backend["name"]
-                validated["game_id"] = game_id
-                validated_rows.append(validated)
-
-                latency_ms = validated.get("latency_ms")
-                if isinstance(latency_ms, (int, float)):
-                    backend_stats[backend["backend_id"]]["latencies"].append(float(latency_ms))
-                backend_stats[backend["backend_id"]]["attempted_turns"] += 1
-
-                if gold_row is not None:
-                    gold_row["metadata"]["backend_id"] = backend["backend_id"]
-                    gold_row["metadata"]["backend_name"] = backend["name"]
-                    gold_row["metadata"]["api_style"] = backend["api_style"]
-                    gold_row["metadata"]["game_id"] = game_id
-                    gold_rows.append(gold_row)
-                    game_accepted_turns += 1
-                    backend_stats[backend["backend_id"]]["accepted_turns"] += 1
-                if rejected_row is not None:
-                    rejected_row["backend_id"] = backend["backend_id"]
-                    rejected_row["backend_name"] = backend["name"]
-                    rejected_row["game_id"] = game_id
-                    rejected_rows.append(rejected_row)
-
-                trajectory_rows.append(
-                    {
-                        "run_id": run_id,
-                        "game_id": game_id,
-                        "turn_index": turn_index,
-                        "seed": game_seed,
-                        "backend_id": backend["backend_id"],
-                        "backend_name": backend["name"],
-                        "backend_model": backend["model"],
-                        "api_style": backend["api_style"],
-                        "scenario": scenario,
-                        "raw_response": raw_row,
-                        "validated": validated,
-                    }
-                )
-
-                game_decision_turns += 1
-                total_decision_turns += 1
-
-                if gold_row is not None:
-                    move_token = str(gold_row["output"]).replace('{"move":"', "").replace('"}', "")
-                    move_lookup = {
-                        token: move
-                        for token, move in zip(
-                            scenario["legal_move_tokens"],
-                            scenario["legal_moves"],
-                            strict=True,
+                    if pending_specs:
+                        spec = pending_specs.pop(0)
+                        next_future = submit_game(
+                            executor=executor,
+                            backend=backend,
+                            spec=spec,
                         )
-                    }
-                    chosen_move = move_lookup.get(move_token)
-                    if chosen_move is None:
-                        raise RuntimeError(
-                            f"Accepted move token {move_token!r} was not recoverable."
-                        )
-                    game.apply_move(chosen_move)
-                else:
-                    game.apply_move(legal_moves[0])
-
-                turn_index += 1
-
-            finish_game(
-                connection,
-                game_id=game_id,
-                ended_at=utc_now(),
-                status="completed",
-                candidate_turns=game_candidate_turns,
-                decision_turns=game_decision_turns,
-                skipped_forced_turns=game_skipped_forced,
-                accepted_turns=game_accepted_turns,
-            )
+                        future_to_backend[next_future] = backend
 
         wall_time_s = time.perf_counter() - started
         write_jsonl(trajectory_path, trajectory_rows)
@@ -459,6 +557,7 @@ def main() -> None:
                 accepted_turns=stats["accepted_turns"],
                 avg_latency_ms=avg_latency_ms,
             )
+        connection.commit()
 
         upsert_run_metrics(
             connection,
@@ -471,6 +570,7 @@ def main() -> None:
             avg_latency_ms=summary["latency_ms"]["avg"],
             p95_latency_ms=summary["latency_ms"]["p95"],
         )
+        connection.commit()
 
         for kind, path in (
             ("trajectory", trajectory_path),
@@ -500,6 +600,7 @@ def main() -> None:
             size_bytes=manifest_path.stat().st_size,
         )
         finish_run(connection, run_id=run_id, ended_at=utc_now(), status="completed")
+        connection.commit()
 
     print(json.dumps(manifest["summary"], indent=2))
 
