@@ -21,11 +21,21 @@ Then open:
 http://127.0.0.1:8000/html/
 ```
 
+Two browser surfaces are available:
+
+- `index.html`
+  - interactive sandbox for random play or AI-assisted play
+- `benchmark.html`
+  - AI-versus-random benchmark runner with persisted settings and benchmark results
+
 ## How It Works
 
-- `index.html`, `style.css`, and `main.js` provide the UI.
-- `main.js` loads a vendored local copy of Pyodide from `html/vendor/pyodide/`.
-- `main.js` also loads a vendored local copy of MediaPipe GenAI from `html/vendor/tasks-genai/`.
+- `index.html`, `benchmark.html`, `style.css`, `main.js`, and `benchmark.js` provide the UI
+  surfaces.
+- `main.js` and `benchmark.js` load a vendored local copy of Pyodide from
+  `html/vendor/pyodide/`.
+- `main.js` and `benchmark.js` also load a vendored local copy of MediaPipe GenAI from
+  `html/vendor/tasks-genai/`.
 - The local Python files from `../euchre_game/` are copied into Pyodide's in-memory filesystem.
 - `python/game_bridge.py` handles game state, compact AI context formatting, and move application.
 - Browser persistence uses IndexedDB for settings, metrics, and recent session metadata.

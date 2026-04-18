@@ -22,3 +22,4 @@ html/vendor/model-libs/*
 factory/output/*.jsonl
 factory/output/jobs/
 factory/output/manual_reviews.jsonl
+factory/output/runs/**/*.jsonl

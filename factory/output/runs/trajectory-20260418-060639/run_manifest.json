@@ -1,0 +1,76 @@
+{
+  "run_id": "trajectory-20260418-060639",
+  "started_at": "2026-04-18T06:06:39.713176+00:00",
+  "ended_at": "2026-04-18T06:49:10.371008+00:00",
+  "config": {
+    "games": 50,
+    "seed": 7,
+    "winning_score": 10,
+    "timeout": 180.0,
+    "retries": 2,
+    "prompt_version": "v2-grounded-short",
+    "backends": [
+      {
+        "backend_id": "m4-mlx",
+        "name": "m4-mlx",
+        "api_style": "openai",
+        "host": "http://192.168.1.107:8080",
+        "model": "mlx-community/gemma-4-e4b-it-8bit",
+        "weight": 1.0
+      },
+      {
+        "backend_id": "win-ollama",
+        "name": "win-ollama",
+        "api_style": "ollama",
+        "host": "http://127.0.0.1:11434",
+        "model": "gemma4:latest",
+        "weight": 1.0
+      }
+    ]
+  },
+  "paths": {
+    "trajectory": "factory/output/runs/trajectory-20260418-060639/trajectory.jsonl",
+    "raw_responses": "factory/output/runs/trajectory-20260418-060639/raw_responses.jsonl",
+    "validated_rows": "factory/output/runs/trajectory-20260418-060639/validated_rows.jsonl",
+    "gold_dataset": "factory/output/runs/trajectory-20260418-060639/gold_dataset.jsonl",
+    "rejected_rows": "factory/output/runs/trajectory-20260418-060639/rejected_rows.jsonl"
+  },
+  "summary": {
+    "attempted_responses": 770,
+    "accepted_gold_rows": 770,
+    "parse_failure_rate": 0.0,
+    "illegal_or_rejected_rate": 0.0,
+    "responses_per_minute": 18.11,
+    "wall_time_seconds": 2550.61,
+    "latency_ms": {
+      "avg": 6502.52,
+      "p95": 9260.42,
+      "max": 22977.62
+    },
+    "trajectory_stats": {
+      "candidate_turns": 1209,
+      "decision_turns": 770,
+      "skipped_forced_turns": 439
+    },
+    "backends": {
+      "m4-mlx": {
+        "name": "m4-mlx",
+        "model": "mlx-community/gemma-4-e4b-it-8bit",
+        "api_style": "openai",
+        "games": 29,
+        "attempted_turns": 471,
+        "accepted_turns": 471,
+        "avg_latency_ms": 5215.75
+      },
+      "win-ollama": {
+        "name": "win-ollama",
+        "model": "gemma4:latest",
+        "api_style": "ollama",
+        "games": 21,
+        "attempted_turns": 299,
+        "accepted_turns": 299,
+        "avg_latency_ms": 8529.49
+      }
+    }
+  }
+}

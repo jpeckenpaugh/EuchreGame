@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EuchreGame AI Benchmark</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script src="./vendor/pyodide/pyodide.js"></script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Benchmark Sandbox</p>
+          <h1>AI vs Random Benchmark</h1>
+          <p class="hero-copy">
+            Run the local Gemma browser model against random legal play, watch each game unfold on
+            the live table, and score the AI on move validity, trick share, and final game points.
+          </p>
+        </div>
+        <div class="hero-status">
+          <span id="status-pill" class="status-pill status-loading">Loading Pyodide</span>
+          <p id="status-text" class="status-text">Bootstrapping the benchmark runtime.</p>
+        </div>
+      </header>
+
+      <section class="control-strip">
+        <label class="control-field">
+          <span>Seed</span>
+          <input id="seed-input" type="number" inputmode="numeric" placeholder="Random" />
+        </label>
+
+        <label class="control-field">
+          <span>Games</span>
+          <input id="games-input" type="number" min="1" step="1" value="10" />
+        </label>
+
+        <label class="control-field">
+          <span>AI Team</span>
+          <select id="ai-team-select">
+            <option value="0" selected>North / South</option>
+            <option value="1">East / West</option>
+          </select>
+        </label>
+
+        <label class="control-field">
+          <span>View</span>
+          <select id="view-select">
+            <option value="god" selected>God View</option>
+            <option value="seat:0">Player 0</option>
+            <option value="seat:1">Player 1</option>
+            <option value="seat:2">Player 2</option>
+            <option value="seat:3">Player 3</option>
+          </select>
+        </label>
+
+        <label class="control-field">
+          <span>Auto Speed</span>
+          <select id="speed-select">
+            <option value="1100">Slow</option>
+            <option value="700" selected>Normal</option>
+            <option value="350">Fast</option>
+          </select>
+        </label>
+
+        <div class="button-row">
+          <button id="start-benchmark-button" class="button button-primary" disabled>
+            Run Benchmark
+          </button>
+          <button id="stop-benchmark-button" class="button button-ghost" disabled>Stop</button>
+          <button id="reset-results-button" class="button button-sand" disabled>
+            Reset Results
+          </button>
+        </div>
+      </section>
+
+      <section class="control-strip ai-strip">
+        <label class="control-field control-wide">
+          <span>Model Asset</span>
+          <input
+            id="model-path-input"
+            type="text"
+            spellcheck="false"
+            value="./vendor/models/gemma-4-E2B-it-web.task"
+          />
+        </label>
+
+        <label class="control-field">
+          <span>AI Temp</span>
+          <input id="ai-temperature-input" type="number" min="0" max="2" step="0.1" value="0.1" />
+        </label>
+
+        <label class="control-field">
+          <span>AI Top K</span>
+          <input id="ai-top-k-input" type="number" min="1" max="40" step="1" value="1" />
+        </label>
+
+        <label class="control-field">
+          <span>AI Max Tokens</span>
+          <input id="ai-max-tokens-input" type="number" min="64" max="2048" step="1" value="256" />
+        </label>
+
+        <label class="control-field">
+          <span>AI Seed</span>
+          <input id="ai-seed-input" type="number" inputmode="numeric" placeholder="Optional" />
+        </label>
+
+        <label class="control-check">
+          <input id="ai-fallback-checkbox" type="checkbox" checked />
+          <span>Fallback to random on AI failure</span>
+        </label>
+
+        <div class="button-row ai-button-row">
+          <button id="load-ai-button" class="button" disabled>Load AI</button>
+          <button id="unload-ai-button" class="button button-sand" disabled>Unload AI</button>
+        </div>
+      </section>
+
+      <main class="arena">
+        <aside class="side-card summary-card">
+          <div class="card-header">
+            <p class="eyebrow">Benchmark Run</p>
+            <h2>AI vs Random</h2>
+          </div>
+
+          <div class="summary-grid">
+            <div class="summary-item">
+              <span class="summary-label">Run Status</span>
+              <strong id="run-status-value">Idle</strong>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Games Progress</span>
+              <strong id="games-progress-value">0 / 10</strong>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Current Game</span>
+              <strong id="current-game-value">-</strong>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">AI Team</span>
+              <strong id="ai-team-value">North / South</strong>
+            </div>
+          </div>
+
+          <section class="benchmark-section benchmark-score-card">
+            <span class="summary-label">Competence Score</span>
+            <strong id="competence-score-value">-</strong>
+            <p id="competence-score-note" class="status-text benchmark-score-note">
+              Heuristic score based on move quality, trick share, and final point share.
+            </p>
+          </section>
+
+          <section class="benchmark-section">
+            <div class="card-header compact">
+              <p class="eyebrow">Move Quality</p>
+              <h2>Model Reliability</h2>
+            </div>
+
+            <div class="summary-grid metrics-grid">
+              <div class="summary-item">
+                <span class="summary-label">AI Turns</span>
+                <strong id="metric-ai-turns">0</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Forced Moves</span>
+                <strong id="metric-forced-moves">0</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Valid JSON</span>
+                <strong id="metric-valid-json">0%</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Legal Moves</span>
+                <strong id="metric-legal-moves">0%</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Fallbacks</span>
+                <strong id="metric-fallbacks">0</strong>
+              </div>
+            </div>
+          </section>
+
+          <section class="benchmark-section">
+            <div class="card-header compact">
+              <p class="eyebrow">Play Quality</p>
+              <h2>Tricks And Scores</h2>
+            </div>
+
+            <div class="summary-grid metrics-grid">
+              <div class="summary-item">
+                <span class="summary-label">AI Tricks</span>
+                <strong id="metric-ai-tricks">0</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Random Tricks</span>
+                <strong id="metric-random-tricks">0</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">AI Trick Share</span>
+                <strong id="metric-trick-share">0%</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">AI Final Points</span>
+                <strong id="metric-ai-points">0</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Random Final Points</span>
+                <strong id="metric-random-points">0</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Avg Final Score</span>
+                <strong id="metric-average-score">-</strong>
+              </div>
+            </div>
+
+            <div class="ai-status-block">
+              <p id="last-game-score-line" class="ai-line">Last completed game: none yet.</p>
+            </div>
+          </section>
+
+          <section class="benchmark-section">
+            <div class="card-header compact">
+              <p class="eyebrow">Current Game</p>
+              <h2>Table Summary</h2>
+            </div>
+
+            <div class="summary-grid">
+              <div class="summary-item">
+                <span class="summary-label">Phase</span>
+                <strong id="phase-value">-</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Hand</span>
+                <strong id="hand-value">-</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Trump</span>
+                <strong id="trump-value">-</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Upcard</span>
+                <strong id="upcard-value">-</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Dealer</span>
+                <strong id="dealer-value">-</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Current Player</span>
+                <strong id="current-player-value">-</strong>
+              </div>
+            </div>
+
+            <section class="scoreboard">
+              <div class="team-score team-zero">
+                <span class="team-name">North / South</span>
+                <strong id="score-team-0">0</strong>
+                <span id="tricks-team-0" class="team-meta">0 tricks</span>
+              </div>
+              <div class="team-score team-one">
+                <span class="team-name">East / West</span>
+                <strong id="score-team-1">0</strong>
+                <span id="tricks-team-1" class="team-meta">0 tricks</span>
+              </div>
+            </section>
+
+            <section class="legal-box">
+              <p class="legal-label">Legal moves for the acting player</p>
+              <div id="legal-moves" class="legal-pills"></div>
+            </section>
+          </section>
+
+          <section class="benchmark-section ai-box">
+            <div class="card-header compact">
+              <p class="eyebrow">AI Status</p>
+              <h2>Gemma Runtime</h2>
+            </div>
+
+            <div class="summary-grid ai-summary-grid">
+              <div class="summary-item">
+                <span class="summary-label">Model Asset</span>
+                <strong id="ai-cache-value">-</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Last Source</span>
+                <strong id="ai-last-source-value">-</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Last Latency</span>
+                <strong id="ai-last-latency-value">-</strong>
+              </div>
+            </div>
+
+            <div class="ai-status-block">
+              <p id="ai-status-line" class="ai-line">AI idle. Load the model to benchmark it.</p>
+              <p id="cache-status-line" class="ai-line">Model asset status unknown.</p>
+              <p id="storage-status-line" class="ai-line">Persistent storage not requested yet.</p>
+            </div>
+          </section>
+
+          <section class="benchmark-section">
+            <div class="card-header compact">
+              <p class="eyebrow">Recent Results</p>
+              <h2>Completed Games</h2>
+            </div>
+            <ol id="benchmark-history-list" class="log-list compact-log"></ol>
+          </section>
+        </aside>
+
+        <section class="table-card">
+          <div class="felt-board">
+            <div id="seat-0" class="seat-panel seat-top"></div>
+            <div id="seat-1" class="seat-panel seat-right"></div>
+            <div id="seat-2" class="seat-panel seat-bottom"></div>
+            <div id="seat-3" class="seat-panel seat-left"></div>
+
+            <div class="center-well">
+              <div class="center-header">
+                <div>
+                  <p class="eyebrow">Center Table</p>
+                  <h2>Current Trick</h2>
+                </div>
+                <div class="center-chip">
+                  <span>Viewer</span>
+                  <strong id="viewer-label">God View</strong>
+                </div>
+              </div>
+
+              <div class="center-details">
+                <div class="upcard-stack">
+                  <span class="stack-label">Upcard</span>
+                  <div id="upcard-card" class="card-slot"></div>
+                </div>
+                <div class="upcard-stack">
+                  <span class="stack-label">Last Event</span>
+                  <p id="last-message" class="last-message">Waiting for runtime.</p>
+                </div>
+              </div>
+
+              <div id="trick-grid" class="trick-grid"></div>
+            </div>
+          </div>
+        </section>
+
+        <aside class="side-card log-card">
+          <div class="card-header">
+            <p class="eyebrow">Event Feed</p>
+            <h2>Game Log</h2>
+          </div>
+          <ol id="log-list" class="log-list" aria-live="polite"></ol>
+        </aside>
+      </main>
+    </div>
+
+    <script type="module" src="./benchmark.js"></script>
+  </body>
+</html>
