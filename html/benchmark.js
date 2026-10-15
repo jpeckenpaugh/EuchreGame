@@ -679,36 +679,48 @@ function ensureDirectory(fs, path) {
   }
 }
 
-async function loadTextFile(url) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to load ${url}: ${response.status}`);
+function pythonPackageSources(filename) {
+  return [
+    new URL(`./euchre_game/${filename}`, import.meta.url),
+    new URL(`../euchre_game/${filename}`, import.meta.url),
+  ];
+}
+
+async function loadTextFile(urls) {
+  const candidates = Array.isArray(urls) ? urls : [urls];
+  let lastError = null;
+  for (const url of candidates) {
+    const response = await fetch(url);
+    if (response.ok) {
+      return response.text();
+    }
+    lastError = new Error(`Failed to load ${url}: ${response.status}`);
   }
-  return response.text();
+  throw lastError ?? new Error("No source URL provided.");
 }
 
 async function stagePythonSources(pyodide) {
   const files = [
     {
-      source: new URL("../euchre_game/__init__.py", import.meta.url),
+      sources: pythonPackageSources("__init__.py"),
       target: "/app/euchre_game/__init__.py",
     },
     {
-      source: new URL("../euchre_game/constants.py", import.meta.url),
+      sources: pythonPackageSources("constants.py"),
       target: "/app/euchre_game/constants.py",
     },
     {
-      source: new URL("../euchre_game/game.py", import.meta.url),
+      sources: pythonPackageSources("game.py"),
       target: "/app/euchre_game/game.py",
     },
     {
-      source: new URL("./python/game_bridge.py", import.meta.url),
+      sources: [new URL("./python/game_bridge.py", import.meta.url)],
       target: "/app/game_bridge.py",
     },
   ];
 
   for (const file of files) {
-    const content = await loadTextFile(file.source);
+    const content = await loadTextFile(file.sources);
     ensureDirectory(pyodide.FS, file.target.substring(0, file.target.lastIndexOf("/")));
     pyodide.FS.writeFile(file.target, content, { encoding: "utf8" });
   }

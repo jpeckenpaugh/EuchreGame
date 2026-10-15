@@ -32,6 +32,12 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
+      - name: Stage Python engine into the site
+        run: |
+          mkdir -p html/euchre_game
+          cp euchre_game/*.py html/euchre_game/
+          touch html/.nojekyll
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

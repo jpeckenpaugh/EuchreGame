@@ -13,6 +13,7 @@ dist/
 .DS_Store
 .idea/
 .vscode/
+html/euchre_game/
 html/vendor/models/*
 !html/vendor/models/.gitkeep
 !html/vendor/models/README.md
