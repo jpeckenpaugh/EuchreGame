@@ -2,11 +2,11 @@
 
 > **Play Partnership Euchre in Your Browser (Powered by Pyodide) or Distill Synthetic Training Data** — A deterministic 24-card Python Euchre engine running client-side in WebAssembly alongside an offline LLM teacher-data factory.
 
-[![Play Now on GitHub Pages](https://img.shields.io/badge/▶_PLAY_SANDBOX-EuchreGame-10b981?style=for-the-badge)](https://jpeckenpaugh.github.io/EuchreGame/)
+[![Play Now on GitHub Pages](https://img.shields.io/badge/▶_PLAY_SANDBOX-EuchreGame-10b981?style=for-the-badge)](https://euchre.livive.net/)
 
 ---
 
-## 🎮 Play in the Browser Sandbox (`https://jpeckenpaugh.github.io/EuchreGame/`)
+## 🎮 Play in the Browser Sandbox (`https://euchre.livive.net/`)
 
 - **In-Browser Python Engine via Pyodide:** Click **New Match**, step trick-by-trick with **Next Move**, or toggle **Auto Play** (`Slow` / `Normal` / `Fast`) to watch 4-player partnership Euchre (North/South vs. East/West) with full Left/Right Bower trump rules.
 - **God View vs. Masked Seat Views:** Switch the **View** selector between `God View` (all 4 hands visible) and `Player 0–3` to inspect the exact hidden-information state JSON exported to AI agents.
